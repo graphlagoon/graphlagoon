@@ -61,6 +61,8 @@ export function describeRun(r: QueryEnrichmentRun): string {
   }
   const parts = [`${r.matched} of ${r.total} ${r.target} matched a row`, `${r.written} got new values`, took];
   if (r.truncated) parts.push(`the result hit the row limit, so some ${r.target} may be missing`);
+  const params = Object.entries(r.params ?? {}).filter(([, v]) => v !== null && v !== undefined);
+  if (params.length) parts.push(`with ${params.map(([k, v]) => `${k}=${String(v)}`).join(', ')}`);
   return parts.join(' · ');
 }
 

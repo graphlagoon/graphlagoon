@@ -9,7 +9,9 @@ import { computed, ref } from 'vue';
 import { useGraphStore } from '@/stores/graph';
 import { authorizedTables, queryEntries, runSpec, targetOf } from '@/utils/queryEnrichment';
 import { describeRun } from '@/utils/enrichmentStatus';
-import { enrichmentDescription } from '@/utils/enrichmentSources';
+import { configuredEnrichmentProviders, enrichmentDescription } from '@/utils/enrichmentSources';
+import { paramHint, paramProblem, paramText, paramValues } from '@/utils/providerParams';
+import type { EnrichmentTable, ProviderParamInfo } from '@/types/graph';
 import { guideUrl } from '@/utils/docsLinks';
 
 const graph = useGraphStore();
@@ -18,10 +20,38 @@ const tables = computed(() => authorizedTables(graph.currentContext));
 const edgeCount = computed(() => graph.edges.length);
 const running = ref<string | null>(null);
 
-async function run(name: string) {
+const providers = configuredEnrichmentProviders();
+const providerOf = (q: EnrichmentTable) => providers.find((p) => p.name === q.provider?.name);
+
+/** The parameters of `q` that its author lets whoever runs it change. */
+function openParams(q: EnrichmentTable): ProviderParamInfo[] {
+  const open = q.provider?.runtime_params ?? [];
+  return (providerOf(q)?.params ?? []).filter((p) => open.includes(p.name));
+}
+
+/** What this context sets for a parameter (else the provider's default), as text. */
+const contextValue = (q: EnrichmentTable, p: ProviderParamInfo) => paramText(q.provider?.params?.[p.name] ?? p.default);
+
+/** Entry name → parameter name → the text typed for this run ('' = the context's value). */
+const typed = ref<Record<string, Record<string, string>>>({});
+const textOf = (q: EnrichmentTable, name: string) => typed.value[q.name]?.[name] ?? '';
+function setText(q: EnrichmentTable, name: string, text: string) {
+  typed.value = { ...typed.value, [q.name]: { ...typed.value[q.name], [name]: text } };
+}
+
+function problemOf(q: EnrichmentTable, p: ProviderParamInfo): string {
+  const text = textOf(q, p.name);
+  if (!text.trim() && p.required && !contextValue(q, p)) return 'needs a value';
+  return paramProblem(p, text);
+}
+const blocked = (q: EnrichmentTable) => openParams(q).some((p) => problemOf(q, p));
+
+async function run(q: EnrichmentTable) {
+  const name = q.name;
   running.value = name;
   try {
-    await graph.runQueryEnrichment({ names: [name] });
+    const given = paramValues(openParams(q), typed.value[name] ?? {});
+    await graph.runQueryEnrichment({ names: [name], ...(Object.keys(given).length ? { params: { [name]: given } } : {}) });
   } finally {
     running.value = null;
   }
@@ -62,14 +92,42 @@ function outcome(name: string): { kind: 'ok' | 'error' | 'running'; text: string
             <span class="chip">{{ (runSpec(q)?.run ?? 'manual') === 'auto' ? 'after every query' : 'by hand' }}</span>
             <button
               class="btn btn-sm btn-primary"
-              :disabled="!!running || (!edgeCount && !graph.nodes.length)"
+              :disabled="!!running || (!edgeCount && !graph.nodes.length) || blocked(q)"
               data-testid="your-data-databricks-run"
-              @click="run(q.name)"
+              @click="run(q)"
             >
               {{ running === q.name ? 'Running…' : graph.queryEnrichmentRuns[q.name]?.status === 'error' ? 'Retry' : 'Run' }}
             </button>
           </div>
           <p v-if="enrichmentDescription(q)" class="what" data-testid="your-data-databricks-description">{{ enrichmentDescription(q) }}</p>
+          <p v-if="providerOf(q)?.columns?.length" class="what" data-testid="your-data-databricks-columns">
+            Adds: {{ providerOf(q)!.columns!.join(', ') }}
+          </p>
+          <div v-if="openParams(q).length" class="params" data-testid="your-data-databricks-params">
+            <label v-for="p in openParams(q)" :key="p.name" class="param">
+              <span class="param-name"><code>{{ p.name }}</code> <span v-if="paramHint(p)">{{ paramHint(p) }}</span></span>
+              <select
+                v-if="p.choices?.length || p.type === 'bool'"
+                class="form-control"
+                :value="textOf(q, p.name)"
+                :data-testid="`your-data-databricks-param-${p.name}`"
+                @change="setText(q, p.name, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">{{ contextValue(q, p) ? `This context's value (${contextValue(q, p)})` : '(not set)' }}</option>
+                <option v-for="c in p.type === 'bool' ? ['true', 'false'] : p.choices!" :key="c" :value="c">{{ c }}</option>
+              </select>
+              <input
+                v-else
+                type="text"
+                class="form-control"
+                :value="textOf(q, p.name)"
+                :placeholder="contextValue(q, p) ? `This context's value: ${contextValue(q, p)}` : 'required'"
+                :data-testid="`your-data-databricks-param-${p.name}`"
+                @input="setText(q, p.name, ($event.target as HTMLInputElement).value)"
+              />
+              <span v-if="problemOf(q, p)" class="param-problem" data-testid="your-data-databricks-param-problem">{{ p.name }} {{ problemOf(q, p) }}</span>
+            </label>
+          </div>
           <p
             v-if="outcome(q.name)"
             class="outcome"
@@ -95,6 +153,24 @@ function outcome(name: string): { kind: 'ok' | 'error' | 'running'; text: string
   color: var(--text-secondary, #666);
   overflow-wrap: anywhere;
   white-space: pre-line;
+}
+.params {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 12px;
+  margin-top: 6px;
+}
+.param {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.8rem;
+}
+.param-name {
+  color: var(--text-secondary, #666);
+}
+.param-problem {
+  color: var(--danger-color, #f44336);
 }
 .hint,
 .tables {

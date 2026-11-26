@@ -76,6 +76,7 @@ import {
   stripEnriched,
   type EnrichmentProvenance,
 } from '@/utils/queryEnrichment';
+import { enrichmentBatchSize } from '@/utils/enrichmentSources';
 import { aggregateParallelEdges } from '@/utils/parallelEdges';
 import type { HubLeavesMode } from '@/utils/hubLeaves';
 import { AUTO_HUB_MIN_LEAVES, type RevealByZoomMode } from '@/utils/autoAdjust';
@@ -446,6 +447,8 @@ export interface QueryEnrichmentRun {
   finishedAt?: number | null;
   batchesDone?: number;
   batchesTotal?: number;
+  /** A provider's parameter values this run used (as the server resolved them). */
+  params?: Record<string, unknown> | null;
 }
 
 export const useGraphStore = defineStore('graph', () => {
@@ -1507,7 +1510,12 @@ export const useGraphStore = defineStore('graph', () => {
    * load: the graph is already usable; an auto run that fails says so once in a toast.
    */
   async function runQueryEnrichment(
-    options: { names?: string[]; only?: { edges: Set<string>; nodes: Set<string> } } = {},
+    options: {
+      names?: string[];
+      only?: { edges: Set<string>; nodes: Set<string> };
+      /** Entry name → values for the provider parameters its author lets a run change (a run by hand only). */
+      params?: Record<string, Record<string, string | number | boolean>>;
+    } = {},
   ): Promise<Record<string, QueryEnrichmentRun>> {
     const ctx = currentContext.value;
     if (!ctx || investigationMode.value) return {};
@@ -1526,16 +1534,21 @@ export const useGraphStore = defineStore('graph', () => {
   async function runQueryEnrichmentEntries(
     ctx: GraphContext,
     entries: EnrichmentTable[],
-    options: { names?: string[]; only?: { edges: Set<string>; nodes: Set<string> } },
+    options: {
+      names?: string[];
+      only?: { edges: Set<string>; nodes: Set<string> };
+      params?: Record<string, Record<string, string | number | boolean>>;
+    },
   ): Promise<Record<string, QueryEnrichmentRun>> {
     const base = savedGraph();
+    const batch = enrichmentBatchSize();
     const token = queryEnrichmentToken;
     const done: Record<string, QueryEnrichmentRun> = {};
     let failed = 0;
     const plans = entries
       .map((entry) => {
         const target = targetOf(entry);
-        const payloads = runPayloads(base.nodes, base.edges, entry, undefined, options.only);
+        const payloads = runPayloads(base.nodes, base.edges, entry, batch, options.only);
         const total = payloads.reduce((n, p) => n + (target === 'nodes' ? p.nodes.length : p.edges.length), 0);
         return { entry, target, payloads, total };
       })
@@ -1568,7 +1581,11 @@ export const useGraphStore = defineStore('graph', () => {
       const overwrite = !!runSpec(entry)?.overwrite;
       try {
         for (const payload of payloads) {
-          const result = await api.runEnrichmentQuery(ctx.id, entry.name, payload);
+          const given = options.params?.[entry.name];
+          const result = await api.runEnrichmentQuery(
+            ctx.id, entry.name, given && Object.keys(given).length ? { ...payload, params: given } : payload,
+          );
+          if (result.params) run.params = result.params;
           if (token !== queryEnrichmentToken || currentContext.value?.id !== ctx.id) return done;
           if (target === 'nodes') {
             const reached = nodes.value.filter((n) => result.rows[n.node_id]);

@@ -1,3 +1,6 @@
+import type { EnrichmentProviderInfo } from '@/types/graph';
+import { paramLines } from './providerParams';
+
 /**
  * "Ask an AI" for a context's Enrichments: a copy-paste prompt that carries this
  * context's tables, columns, types and current entries, the exact YAML the form imports, and
@@ -20,9 +23,43 @@ export interface EnrichmentTablesSkillInput {
   allowedSources?: string[] | null;
   /** The entries in the form now, as YAML (empty when there are none). */
   currentYaml: string;
+  /** Enrichment providers registered on this server (code, not SQL), with what each does. */
+  providers?: EnrichmentProviderInfo[];
+}
+
+/** The registered providers as the prompt lists them: what each adds, to what, with which parameters. */
+export function providerSection(providers: EnrichmentProviderInfo[] | undefined): string {
+  if (!providers?.length) {
+    return 'No provider is registered on this server: do not write `provider` entries.';
+  }
+  const items = providers.map((p) => {
+    const adds = p.columns?.length ? `\n  Adds: ${p.columns.map((c) => `\`${c}\``).join(', ')}.` : '';
+    return `- \`${p.name}\` — ${p.label}. Enriches: ${p.targets.join(', ')}.\n  ${p.description || '(no description)'}${adds}\n  Parameters:\n${paramLines(p.params)}`;
+  });
+  return `These are ALL the providers registered on this server. Use only these names; never invent one.\n\n${items.join('\n')}`;
 }
 
 const list = (items: string[], empty = '(none declared)') => (items.length ? items.map((i) => `\`${i}\``).join(', ') : empty);
+
+/** A provider entry for the YAML example, with a real registered name ('' when there is none). */
+function providerExample(providers: EnrichmentProviderInfo[] | undefined): string {
+  const p = providers?.[0];
+  if (!p) return '';
+  const param = p.params?.find((x) => x.default !== null && x.default !== undefined);
+  const lines = [
+    `  - name: ${p.name.replace(/[^a-z0-9]+/g, '_').replace(/^[^a-z]+/, '') || 'provider'}            # a provider entry: no table, no SQL`,
+    `    label: ${p.label}`,
+    '    description: <what it adds and when to use it>',
+    '    provider:',
+    `      name: ${p.name}`,
+    `      target: ${p.targets[0] ?? 'nodes'}`,
+    '      run: manual',
+  ];
+  if (param) {
+    lines.push(`      params: {${param.name}: ${JSON.stringify(param.default)}}`, `      runtime_params: [${param.name}]   # optional: what a run may change`);
+  }
+  return `${lines.join('\n')}\n`;
+}
 
 export function buildEnrichmentTablesSkill(input: EnrichmentTablesSkillInput): string {
   const own: string[] = [];
@@ -63,6 +100,10 @@ lets a query read the table. An entry may also:
 
 An entry with neither just authorizes its table so another entry's query can join it.
 
+3. **Or, with no table at all, enrich with a provider**: code the deployment registered in Python
+   (it may call an internal service or another database). The entry only names it (\`provider.name\`),
+   picks the \`target\` and \`run\`, and may set its parameters. See "Providers" below.
+
 Give every entry that looks nodes up or runs a query a \`description\` (optional, up to 1000
 characters): what it adds and when to use it, in one or two sentences. People see it next to the
 enrichment, and an AI agent reads it to decide whether to run it.
@@ -76,6 +117,17 @@ enrichment, and an AI agent reads it to decide whether to run it.
 - Node properties (keys of \`graph_nodes.props\`, sent only with \`node_props: true\`): ${list(input.nodeProperties)}
 
 ${ownSection}
+
+## Providers
+
+${providerSection(input.providers)}
+
+In a provider entry: \`params\` sets parameter values (only declared names, inside their bounds);
+\`runtime_params\` lists the parameters whoever runs it by hand (a person or an AI agent) may
+change — leave it out unless I ask, so nobody changes a value I fixed. \`node_props: true\` /
+\`edge_props: true\` send the node / edge properties to the provider (otherwise ids and types only):
+set them only when the provider's description says it needs them. A provider entry has no
+\`table\`, \`query\` or lookup fields.
 
 ## How a query reads the graph
 
@@ -147,7 +199,7 @@ enrichment_tables:
     match_source: node_id     # or {kind: prop, name: <node property>}
     cardinality: many         # one: columns become node properties; many: a table in the inspector
     columns: [device_id, ip, seen_at]
-\`\`\`
+${providerExample(input.providers)}\`\`\`
 
 ## What is configured now
 

@@ -49,4 +49,25 @@ describe('buildEnrichmentTablesSkill', () => {
       ['channels', null], ['tx_risk', 'edges'], ['account_activity', 'nodes'], ['devices', null],
     ]);
   });
+
+  it('lists every registered provider with what it does, what it adds and its parameters', () => {
+    expect(buildEnrichmentTablesSkill(input)).toContain('No provider is registered on this server');
+    const text = buildEnrichmentTablesSkill({
+      ...input,
+      providers: [{
+        name: 'kyc-demo', label: 'KYC (demo)', description: 'Risk tier from Lakebase.', targets: ['nodes'], columns: ['kyc_tier'],
+        params: [{ name: 'as_of_days', type: 'int', required: false, default: 30, description: 'Window', choices: null, min: 1, max: 365 }],
+      }],
+    });
+    expect(text).toContain('`kyc-demo` — KYC (demo). Enriches: nodes.');
+    expect(text).toContain('Risk tier from Lakebase.');
+    expect(text).toContain('Adds: `kyc_tier`.');
+    expect(text).toContain('- `as_of_days` (int, default 30, min 1, max 365): Window');
+    expect(text).toContain('never invent one');
+    // The example it gives names that provider, and imports.
+    const example = text.split('## YAML format')[1].split('```yaml\n')[1].split('```')[0];
+    const { tables, errors } = parseEnrichmentTablesYaml(example);
+    expect(errors).toEqual([]);
+    expect(tables[tables.length - 1].provider).toMatchObject({ name: 'kyc-demo', params: { as_of_days: 30 }, runtime_params: ['as_of_days'] });
+  });
 });

@@ -431,10 +431,12 @@ async def run_query(warehouse, context, name: str, edges: list, nodes: list) -> 
 # --- Enrichment by a registered provider --------------------------------------
 
 
-def provider_problem(spec: dict) -> Optional[EnrichmentError]:
-    """Why a provider entry cannot run here, or None: its provider is not
-    registered in this deployment, or does not enrich the entry's target."""
+def provider_problem(spec: dict, context=None) -> Optional[EnrichmentError]:
+    """Why a provider entry cannot run here, or None: its provider is not registered
+    in this deployment, does not enrich the entry's target, is not for this context
+    (``context`` given), or the entry's parameters do not fit what it declares."""
     from graphlagoon.services.enrichment_providers import get_enrichment_provider
+    from graphlagoon.services.precomputed.params import ParamError, coerce_values
 
     ref = spec.get("provider") or {}
     provider = get_enrichment_provider(ref.get("name", ""))
@@ -451,7 +453,50 @@ def provider_problem(spec: dict) -> Optional[EnrichmentError]:
             "ENRICHMENT_PROVIDER_TARGET",
             f"The provider '{provider.name}' does not enrich {target}",
         )
+    if context is not None and provider.applies_to is not None and not provider.applies_to(context):
+        return EnrichmentError(
+            403,
+            "ENRICHMENT_PROVIDER_NOT_ALLOWED",
+            f"The provider '{provider.name}' is not available to this context",
+        )
+    declared = {p.name for p in provider.params}
+    runtime = ref.get("runtime_params") or []
+    unknown = next((n for n in runtime if n not in declared), None)
+    if unknown is not None:
+        return EnrichmentError(
+            400,
+            "ENRICHMENT_PARAM_INVALID",
+            f"The provider '{provider.name}' declares no parameter '{unknown}'",
+        )
+    # A required parameter left to the run is filled then; every other one must fit now.
+    specs = [p for p in provider.params if not (p.required and p.name in runtime
+                                                and p.name not in (ref.get("params") or {}))]
+    try:
+        coerce_values(specs, ref.get("params") or {})
+    except ParamError as e:
+        return EnrichmentError(400, "ENRICHMENT_PARAM_INVALID", e.message)
     return None
+
+
+def resolve_provider_params(provider, ref: dict, given: Optional[dict]) -> dict:
+    """The values one run uses: the run's own (only the names the entry's author
+    listed in ``runtime_params``), over the entry's, over the declared defaults."""
+    from graphlagoon.services.precomputed.params import ParamError, coerce_values
+
+    given = {k: v for k, v in (given or {}).items() if v is not None and v != ""}
+    allowed = set(ref.get("runtime_params") or [])
+    locked = next((k for k in given if k not in allowed), None)
+    if locked is not None:
+        raise EnrichmentError(
+            400,
+            "ENRICHMENT_PARAM_INVALID",
+            f"'{locked}' cannot be changed when running this enrichment"
+            + (f"; a run may set: {', '.join(sorted(allowed))}" if allowed else ""),
+        )
+    try:
+        return coerce_values(provider.params, {**(ref.get("params") or {}), **given})
+    except ParamError as e:
+        raise EnrichmentError(400, "ENRICHMENT_PARAM_INVALID", e.message)
 
 
 def _scalar(value: Any) -> Any:
@@ -461,9 +506,11 @@ def _scalar(value: Any) -> Any:
 
 
 async def run_provider(
-    context, name: str, edges: list, nodes: list, user_email: Optional[str]
+    context, name: str, edges: list, nodes: list, user_email: Optional[str],
+    params: Optional[dict] = None, user_token: Optional[str] = None,
 ) -> dict:
-    """Same result as ``run_query``, computed by the entry's registered provider."""
+    """Same result as ``run_query``, computed by the entry's registered provider,
+    plus the ``params`` it ran with."""
     import asyncio
     import logging
 
@@ -473,12 +520,14 @@ async def run_provider(
         get_enrichment_provider,
     )
 
+    log = logging.getLogger(__name__)
     spec = find_table(context, name)
-    problem = provider_problem(spec)
+    problem = provider_problem(spec, context)
     if problem:
         raise problem
     ref = spec["provider"]
     provider = get_enrichment_provider(ref["name"])
+    resolved = resolve_provider_params(provider, ref, params)
     settings = get_settings()
     target = ref.get("target", "edges")
     key, targets = ("node_id", nodes) if target == "nodes" else ("edge_id", edges)
@@ -499,7 +548,7 @@ async def run_provider(
                 "src": e.src,
                 "dst": e.dst,
                 "relationship_type": e.relationship_type,
-                "properties": e.properties or {},
+                "properties": (e.properties or {}) if ref.get("edge_props") else {},
             }
             for e in edges
         ],
@@ -511,6 +560,8 @@ async def run_provider(
             }
             for n in nodes
         ],
+        params=resolved,
+        user_token=user_token,
     )
     async def call():
         try:
@@ -530,15 +581,17 @@ async def run_provider(
     except EnrichmentProviderError as e:
         raise EnrichmentError(502, "ENRICHMENT_PROVIDER_FAILED", str(e) or "The provider failed")
     except Exception:  # never leak the provider's internals
-        logging.getLogger(__name__).exception("Enrichment provider '%s' failed", provider.name)
+        log.exception("Enrichment provider '%s' failed", provider.name)
         raise EnrichmentError(502, "ENRICHMENT_PROVIDER_FAILED", "The provider failed")
     if not isinstance(answer, dict):
-        logging.getLogger(__name__).error(
+        log.error(
             "Enrichment provider '%s' returned %s, not a dict", provider.name, type(answer).__name__
         )
         raise EnrichmentError(502, "ENRICHMENT_PROVIDER_FAILED", "The provider failed")
     query_ms = round((time.perf_counter() - t0) * 1000, 2)
     sent = {getattr(t, key) for t in targets}
+    declared = set(provider.columns)
+    undeclared: set[str] = set()
     rows: dict[str, dict] = {}
     columns: list[str] = []
     kept = 0
@@ -548,8 +601,17 @@ async def run_provider(
         kept += 1
         if kept > settings.enrichment_max_rows:
             break
-        rows[str(ident)] = {str(c): _scalar(v) for c, v in row.items()}
-        columns.extend(c for c in rows[str(ident)] if c not in columns)
+        cells = {str(c): _scalar(v) for c, v in row.items()}
+        if declared:
+            undeclared.update(c for c in cells if c not in declared)
+            cells = {c: v for c, v in cells.items() if c in declared}
+        rows[str(ident)] = cells
+        columns.extend(c for c in cells if c not in columns)
+    if undeclared:
+        log.warning(
+            "Enrichment provider '%s' returned undeclared columns, dropped: %s",
+            provider.name, ", ".join(sorted(undeclared)),
+        )
     return {
         "name": spec["name"],
         "label": spec.get("label"),
@@ -558,6 +620,7 @@ async def run_provider(
         "rows": rows,
         "truncated": kept > settings.enrichment_max_rows,
         "query_ms": query_ms,
+        "params": resolved,
     }
 
 
@@ -566,6 +629,8 @@ async def run_provider(
 # An agent run walks the whole exploration in batches; this caps the warehouse or
 # provider calls of one tool call (the rest is reported as ``truncated``).
 MAX_GRAPH_RUN_BATCHES = 20
+# ...and this, the time: past it the run stops and reports ``truncated`` too.
+MAX_GRAPH_RUN_SECONDS = 120.0
 
 
 def describe_tables(context) -> list[dict]:
@@ -603,6 +668,18 @@ def describe_tables(context) -> list[dict]:
                     "label": (provider.label or provider.name) if provider else ref.get("name"),
                     "registered": provider is not None,
                 }
+                run["edge_props"] = bool(ref.get("edge_props"))
+                # The properties it writes, when its author declared them.
+                run["columns"] = list(provider.columns) if provider else []
+                fixed, runtime = ref.get("params") or {}, set(ref.get("runtime_params") or [])
+                run["params"] = [
+                    {
+                        **p.ui_payload(),
+                        "value": fixed.get(p.name, p.default),
+                        "overridable": p.name in runtime,
+                    }
+                    for p in (provider.params if provider else [])
+                ]
                 if not description and provider:
                     description = provider.description
             else:
@@ -622,17 +699,23 @@ def describe_tables(context) -> list[dict]:
 
 async def run_over_graph(
     warehouse, context, name: str, nodes: list, edges: list, user_email: Optional[str],
-    only: Optional[set] = None,
+    only: Optional[set] = None, params: Optional[dict] = None,
 ) -> dict:
     """Enrichment ``name`` (a query or a provider) over a whole graph, in batches of
     ``enrichment_max_keys`` shaped as the page sends them: target nodes with the edges
     that touch them, or target edges with their endpoint nodes. ``only`` narrows the
-    targets to those ids. Same result as one run, plus ``targets`` and ``batches``."""
+    targets to those ids; ``params`` are a provider run's own values. Same result as
+    one run, plus ``targets`` and ``batches``. A batch that fails after another
+    succeeded does not lose that one: the result then carries ``error``."""
     spec = find_table(context, name)
     ref = spec.get("provider") or spec.get("query")
     if not ref:
         raise EnrichmentError(
             400, "ENRICHMENT_NOT_QUERY", f"'{name}' declares no enrichment query or provider"
+        )
+    if params and not spec.get("provider"):
+        raise EnrichmentError(
+            400, "ENRICHMENT_PARAM_INVALID", f"'{name}' is a SQL query: it takes no parameters"
         )
     target = ref.get("target", "edges")
     size = get_settings().enrichment_max_keys
@@ -647,9 +730,14 @@ async def run_over_graph(
     merged: dict = {
         "name": spec["name"], "label": spec.get("label"), "target": target, "columns": [],
         "rows": {}, "truncated": False, "query_ms": 0.0, "targets": len(targets), "batches": 0,
+        "params": None, "error": None,
     }
+    started = time.perf_counter()
     for start in range(0, len(targets), size):
-        if merged["batches"] >= MAX_GRAPH_RUN_BATCHES:
+        if (
+            merged["batches"] >= MAX_GRAPH_RUN_BATCHES
+            or time.perf_counter() - started > MAX_GRAPH_RUN_SECONDS
+        ):
             merged["truncated"] = True
             break
         batch = targets[start : start + size]
@@ -659,13 +747,23 @@ async def run_over_graph(
         else:
             ends = {i for e in batch for i in (e.src, e.dst)}
             batch_nodes, batch_edges = [by_id[i] for i in ends if i in by_id], batch
-        if spec.get("provider"):
-            result = await run_provider(context, name, batch_edges, batch_nodes, user_email)
-        else:
-            result = await run_query(warehouse, context, name, batch_edges, batch_nodes)
+        try:
+            if spec.get("provider"):
+                result = await run_provider(
+                    context, name, batch_edges, batch_nodes, user_email, params
+                )
+            else:
+                result = await run_query(warehouse, context, name, batch_edges, batch_nodes)
+        except EnrichmentError as e:
+            if not merged["batches"]:
+                raise
+            merged["error"] = {"code": e.code, "message": e.message}
+            merged["truncated"] = True
+            break
         merged["batches"] += 1
         merged["rows"].update(result["rows"])
         merged["columns"].extend(c for c in result["columns"] if c not in merged["columns"])
         merged["truncated"] = merged["truncated"] or result["truncated"]
         merged["query_ms"] = round(merged["query_ms"] + (result.get("query_ms") or 0), 2)
+        merged["params"] = result.get("params")
     return merged

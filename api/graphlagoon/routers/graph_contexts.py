@@ -170,7 +170,7 @@ async def _check_enrichment_tables(request: Request, new, stored, context) -> No
         return
     await require_permission("context.create")(request)
     for spec in changed:
-        refused = spec.get("provider") and provider_problem(spec)
+        refused = spec.get("provider") and provider_problem(spec, context)
         if refused:
             raise HTTPException(
                 status_code=refused.status,
@@ -1048,7 +1048,10 @@ async def run_menu_action_table(
     action with ``resultMode: "table"``) for one node or edge and return its rows,
     without touching the graph. Anyone who can read the context may run it; the
     query is scoped and read-only like the Query Console's. ``running`` is polled
-    and cancelled on ``.../query/table/{statement_id}``."""
+    and cancelled on ``.../query/table/{statement_id}``. A ``run-table-provider``
+    action runs the deployer's registered table provider instead and answers at
+    once (``succeeded`` or ``failed``)."""
+    from graphlagoon.middleware.auth import ACCESS_TOKEN_HEADER
     from graphlagoon.services import menu_action_tables
     from graphlagoon.utils.context_access import get_context_with_access
 
@@ -1063,6 +1066,7 @@ async def run_menu_action_table(
             body.parameters,
             body.row_limit,
             check_match=False,
+            user_token=request.headers.get(ACCESS_TOKEN_HEADER, "").strip() or None,
         )
     except menu_action_tables.MenuActionError as e:
         raise HTTPException(
@@ -1091,8 +1095,15 @@ async def run_enrichment_query(
     context = await get_context_with_access(context_id, user_email)
     try:
         if enrichment.find_table(context, name).get("provider"):
+            from graphlagoon.middleware.auth import ACCESS_TOKEN_HEADER
+
             result = await enrichment.run_provider(
-                context, name, body.edges, body.nodes, user_email
+                context, name, body.edges, body.nodes, user_email, body.params,
+                request.headers.get(ACCESS_TOKEN_HEADER, "").strip() or None,
+            )
+        elif body.params:
+            raise enrichment.EnrichmentError(
+                400, "ENRICHMENT_PARAM_INVALID", f"'{name}' is a SQL query: it takes no parameters"
             )
         else:
             result = await enrichment.run_query(warehouse, context, name, body.edges, body.nodes)
@@ -1113,6 +1124,7 @@ async def run_enrichment_query(
             "nodes": len(body.nodes),
             "rows": len(result["rows"]),
             "truncated": result["truncated"],
+            **({"params": result["params"]} if result.get("params") else {}),
         },
     )
     return result

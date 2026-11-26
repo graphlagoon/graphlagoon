@@ -24,9 +24,11 @@ import type { Node, Edge, QueryTemplate } from '@/types/graph';
 import type {
   ContextMenuActionConfig,
   RunQueryTemplateActionConfig,
+  RunTableProviderActionConfig,
   ShowTableActionConfig,
 } from '@/types/contextMenuActions';
 import { isKnownActionKind, isTableAction } from '@/types/contextMenuActions';
+import { configuredTableProviders } from '@/utils/enrichmentSources';
 
 export const CONFIGURABLE_ACTION_PREFIX = 'configurable-action:';
 
@@ -36,6 +38,7 @@ const KIND_ICONS: Record<string, Component> = {
   'run-query-template': Play,
   'show-same-value': Focus,
   'show-table': Table,
+  'run-table-provider': Table,
 };
 
 /**
@@ -179,6 +182,11 @@ export function useConfigurableMenuActions(host?: MenuActionHost) {
     if (config.kind === 'run-query-template' && !isTableAction(config) && !findTemplate(config.templateId)) {
       return false;
     }
+    // A provider this server does not have, or one with no table for this kind of item, offers nothing.
+    if (config.kind === 'run-table-provider') {
+      const provider = configuredTableProviders().find((p) => p.name === config.provider);
+      if (!provider || !provider.targets.includes(target.type)) return false;
+    }
     return true;
   }
 
@@ -254,6 +262,9 @@ export function useConfigurableMenuActions(host?: MenuActionHost) {
       case 'show-table':
         openCanvasTable(config, target, item);
         return;
+      case 'run-table-provider':
+        openTable(config, target, item);
+        return;
     }
   }
 
@@ -288,7 +299,7 @@ export function useConfigurableMenuActions(host?: MenuActionHost) {
     };
   }
 
-  function openTable(config: RunQueryTemplateActionConfig, target: ContextMenuTarget, item: Node | Edge) {
+  function openTable(config: RunQueryTemplateActionConfig | RunTableProviderActionConfig, target: ContextMenuTarget, item: Node | Edge) {
     const contextId = contextIdOf();
     if (!contextId) {
       error(`"${config.label}" needs a graph context`);

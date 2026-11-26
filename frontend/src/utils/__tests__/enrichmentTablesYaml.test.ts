@@ -104,6 +104,22 @@ describe('provider entries', () => {
     expect(parseEnrichmentTablesYaml(`- {name: d, label: D, table: a.b.c, description: ${'x'.repeat(1001)}}`).errors[0]).toMatch(/1000/);
   });
 
+  it('round-trips a provider\'s parameters and what a run may change', () => {
+    const entry = {
+      name: 'kyc', label: 'KYC',
+      provider: {
+        name: 'kyc-demo', target: 'nodes' as const, run: 'manual' as const, overwrite: false, node_props: false, edge_props: true,
+        params: { as_of_days: 90, source: 'bureau', strict: true }, runtime_params: ['as_of_days'],
+      },
+    };
+    const parsed = parseEnrichmentTablesYaml(enrichmentTablesToYaml([entry]));
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.tables).toEqual([entry]);
+    expect(parseEnrichmentTablesYaml('- {name: k, label: K, provider: {name: kyc-demo, params: [1]}}').errors[0]).toContain('provider.params');
+    expect(parseEnrichmentTablesYaml('- {name: k, label: K, provider: {name: kyc-demo, params: {a: [1]}}}').errors[0]).toContain('params.a');
+    expect(parseEnrichmentTablesYaml('- {name: k, label: K, provider: {name: kyc-demo, runtime_params: days}}').errors[0]).toContain('runtime_params');
+  });
+
   it('refuses a provider entry that also names a table', () => {
     const parsed = parseEnrichmentTablesYaml('- {name: kyc, label: K, table: a.b.c, provider: kyc-demo}');
     expect(parsed.errors[0]).toMatch(/no table/);

@@ -555,7 +555,16 @@ async def run_showcase(api: str, log=print) -> dict[str, Any]:
                     "label": "Demo · KYC profile (Python)",
                     "description": "KYC tier (low, medium, high) and score of each node. Run it before "
                                    "grouping or filtering by risk; it is quick and safe to rerun.",
-                    "provider": {"name": "demo-kyc", "target": "nodes", "run": "auto"},
+                    # The author sets the scheme; whoever runs it by hand may pick another.
+                    "provider": {"name": "demo-kyc", "target": "nodes", "run": "auto",
+                                 "params": {"scheme": "3-tier"}, "runtime_params": ["scheme"]},
+                }],
+                # A table from a provider registered in Python: right-click a node.
+                context_menu_actions=[{
+                    "id": "demo-activity", "kind": "run-table-provider",
+                    "label": "Demo · Monthly activity (provider)", "icon": "▦", "enabled": True,
+                    "match": {"target": "node"}, "provider": "demo-activity",
+                    "paramBindings": {}, "params": {},
                 }],
                 cluster_programs=[{
                     "program_id": "demo-kyc-tier-waits",

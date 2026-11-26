@@ -15,6 +15,9 @@ import type {
 } from '@/types/contextMenuActions';
 import { isKnownActionKind, MAX_NEIGHBORHOOD_HOPS, MAX_PROGRAM_CODE_LENGTH } from '@/types/contextMenuActions';
 import type { PortableSourceSchema } from '@/types/portable';
+import type { TableProviderInfo } from '@/types/graph';
+import { configuredTableProviders } from './enrichmentSources';
+import { paramProblem, paramText, paramValue } from './providerParams';
 import { validateUrlTemplate } from './safeUrl';
 import { extractTemplateProperties, extractTemplateMetrics, parseMetricRef } from './labelFormatter';
 
@@ -92,7 +95,11 @@ function parseMatch(raw: unknown, index: number): MenuActionMatch | string {
   };
 }
 
-export function parseImportedActionConfigs(json: string): ImportResult {
+export function parseImportedActionConfigs(
+  json: string,
+  /** The table providers registered on this server: a `run-table-provider` action is checked against its own. */
+  tableProviders: TableProviderInfo[] = configuredTableProviders(),
+): ImportResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -180,6 +187,46 @@ export function parseImportedActionConfigs(json: string): ImportResult {
         source: parsedSource,
         ...(parsedSource.type === 'program' ? { paramBindings: stringRecord(raw.paramBindings) } : {}),
       });
+    } else if (kind === 'run-table-provider') {
+      if (typeof raw.provider !== 'string' || raw.provider.trim() === '') {
+        return { ok: false, error: `Action ${i + 1}: missing "provider" (a registered table provider's name)` };
+      }
+      const name = raw.provider.trim();
+      const bindings = stringRecord(raw.paramBindings);
+      const fixed: Record<string, string | number | boolean> = {};
+      if (raw.params != null && typeof raw.params === 'object' && !Array.isArray(raw.params)) {
+        for (const [key, value] of Object.entries(raw.params as Record<string, unknown>)) {
+          if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') fixed[key] = value;
+        }
+      }
+      // One registered here is checked now; one that is not is a warning (the actions may
+      // come from another server), never a guess.
+      const provider = tableProviders.find((p) => p.name === name);
+      if (provider) {
+        const declared = provider.params ?? [];
+        for (const key of [...Object.keys(bindings), ...Object.keys(fixed)]) {
+          const spec = declared.find((p) => p.name === key);
+          if (!spec) {
+            const known = declared.map((p) => p.name).join(', ') || 'none';
+            return { ok: false, error: `Action ${i + 1}: provider "${name}" has no parameter "${key}" (it has: ${known})` };
+          }
+          if (key in fixed) {
+            const problem = paramProblem(spec, paramText(fixed[key]));
+            if (problem) return { ok: false, error: `Action ${i + 1}: params.${key} ${problem}` };
+            fixed[key] = paramValue(spec, paramText(fixed[key]));
+          }
+        }
+        const wanted = base.match.target === 'both' ? ['node', 'edge'] : [base.match.target];
+        const unserved = wanted.find((t) => !provider.targets.includes(t as 'node' | 'edge'));
+        if (unserved) return { ok: false, error: `Action ${i + 1}: provider "${name}" has no table for a ${unserved}` };
+      }
+      configs.push({
+        ...base,
+        kind: 'run-table-provider',
+        provider: name,
+        ...(Object.keys(bindings).length ? { paramBindings: bindings } : {}),
+        ...(Object.keys(fixed).length ? { params: fixed } : {}),
+      });
     } else {
       if (typeof raw.templateId !== 'string' || raw.templateId.trim() === '') {
         return { ok: false, error: `Action ${i + 1}: missing "templateId"` };
@@ -209,6 +256,8 @@ export interface ActionCompatibilityWarnings {
   missingProperties: string[];
   /** `run-query-template` ids that no template of this context has. */
   missingTemplateIds: string[];
+  /** `run-table-provider` names this server has no provider for. */
+  missingProviders: string[];
   /**
    * Metric refs used in templates or `metric:` conditions. Metrics are
    * session-computed, so this is always a warning (never an import blocker):
@@ -230,8 +279,12 @@ export function actionCompatibilityWarnings(
     nodeProperties: string[];
     edgeProperties: string[];
     templateIds: string[];
+    /** Registered table provider names (default: this server's). */
+    tableProviders?: string[];
   },
 ): ActionCompatibilityWarnings {
+  const providers = new Set(current.tableProviders ?? configuredTableProviders().map((p) => p.name));
+  const missingProviders = new Set<string>();
   const nodeTypes = new Set(current.nodeTypes);
   const edgeTypes = new Set(current.edgeTypes);
   const properties = new Set([...current.nodeProperties, ...current.edgeProperties]);
@@ -284,6 +337,9 @@ export function actionCompatibilityWarnings(
         }
       }
       for (const binding of Object.values(config.paramBindings ?? {})) checkTemplate(binding);
+    } else if (config.kind === 'run-table-provider') {
+      if (!providers.has(config.provider)) missingProviders.add(config.provider);
+      for (const binding of Object.values(config.paramBindings ?? {})) checkTemplate(binding);
     } else {
       if (!templateIds.has(config.templateId)) missingTemplateIds.add(config.templateId);
       for (const binding of Object.values(config.paramBindings)) checkTemplate(binding);
@@ -295,6 +351,7 @@ export function actionCompatibilityWarnings(
     missingEdgeTypes: [...missingEdgeTypes],
     missingProperties: [...missingProperties],
     missingTemplateIds: [...missingTemplateIds],
+    missingProviders: [...missingProviders],
     sessionMetricRefs: [...sessionMetricRefs],
   };
 }
@@ -315,6 +372,7 @@ export function hasActionCompatibilityWarnings(w: ActionCompatibilityWarnings): 
     w.missingEdgeTypes.length > 0 ||
     w.missingProperties.length > 0 ||
     w.missingTemplateIds.length > 0 ||
+    w.missingProviders.length > 0 ||
     w.sessionMetricRefs.length > 0
   );
 }

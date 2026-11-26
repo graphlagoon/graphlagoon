@@ -592,3 +592,38 @@ describe('canvas tables (show-table)', () => {
     expect(menu.pendingTable.value?.contextId).toBe('');
   });
 });
+
+describe('table from a registered provider (run-table-provider)', () => {
+  const config = {
+    id: 'cfg-provider', label: 'Transactions (API)', enabled: true, kind: 'run-table-provider', provider: 'tx-history',
+    paramBindings: { account: '{node_id}' }, params: { days: 30 }, match: { target: 'both' },
+  } as ContextMenuActionConfig;
+
+  afterEach(() => {
+    delete window.__GRAPH_LAGOON_CONFIG__;
+  });
+
+  it('opens the server table with the bound values; hidden when the provider is not here or has no table for the item', async () => {
+    seedGraph();
+    useGraphStore().currentContext = { id: 'ctx-1' } as never;
+    useContextMenuActionsStore().hydrateFromContext([config]);
+    const menu = useConfigurableMenuActions();
+    menu.register();
+    expect(menu.isVisible(config, nodeTarget('n2'))).toBe(false);
+    window.__GRAPH_LAGOON_CONFIG__ = {
+      table_providers: [{ name: 'tx-history', label: 'Transactions', description: '', targets: ['node'], params: [] }],
+    };
+    expect(menu.isVisible(config, nodeTarget('n2'))).toBe(true);
+    await menu.runAction(config, nodeTarget('n2'));
+    expect(menu.pendingTable.value).toEqual({
+      contextId: 'ctx-1',
+      actionId: 'cfg-provider',
+      label: 'Transactions (API)',
+      target: { type: 'node', id: 'n2', node_type: 'Person' },
+      // The fixed value is the server's to apply; only bindings are resolved here.
+      parameters: { account: 'n2' },
+    });
+    const edgeId = useGraphStore().edges[0]?.edge_id;
+    if (edgeId) expect(menu.isVisible(config, { type: 'edge', id: edgeId, label: '' })).toBe(false);
+  });
+});

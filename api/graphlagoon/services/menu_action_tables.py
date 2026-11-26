@@ -14,6 +14,11 @@ else the binding resolved here from the target (plain placeholders only:
 ``{dst}``, ``{relationship_type}``), else the template default. Templates
 splice ``$id`` as text, like the browser does, so a value that could leave a
 quoted literal, chain a statement or name another parameter is refused.
+
+A ``run-table-provider`` action is the other table action: instead of a query
+template it names a provider the deployer registered in Python
+(``services/table_providers.py``). Same route, same response, same callers; its
+parameters are the provider's declared ones, typed and bounded, never spliced.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 TABLE_KIND = "run-query-template"
+PROVIDER_KIND = "run-table-provider"
 MAX_VALUE_LENGTH = 1000
 _UNSAFE = re.compile(r"['\"\\`;$\x00-\x1f]")
 _PLACEHOLDER = re.compile(r"\{([^{}]*)\}")
@@ -42,12 +48,15 @@ class MenuActionError(Exception):
 # -- which actions ------------------------------------------------------------------
 
 
+def is_provider_action(action: dict) -> bool:
+    return isinstance(action, dict) and action.get("kind") == PROVIDER_KIND
+
+
 def is_table_action(action: dict) -> bool:
-    return (
-        isinstance(action, dict)
-        and action.get("kind") == TABLE_KIND
-        and action.get("resultMode") == "table"
-        and action.get("enabled", True) is not False
+    if not isinstance(action, dict) or action.get("enabled", True) is False:
+        return False
+    return is_provider_action(action) or (
+        action.get("kind") == TABLE_KIND and action.get("resultMode") == "table"
     )
 
 
@@ -251,6 +260,7 @@ async def run(
     row_limit: int = 1000,
     wait: bool = False,
     check_match: bool = True,
+    user_token: Optional[str] = None,
 ) -> dict:
     """Runs the action for ``target``. ``status``: ``needs_parameters`` (nothing
     ran; ``problems`` says why), ``running`` (poll ``statement_id`` on the
@@ -270,6 +280,10 @@ async def run(
     if check_match and not matches(action, target):
         raise MenuActionError(
             400, "MENU_ACTION_NOT_APPLICABLE", f"'{action.get('label')}' does not apply to this {target.get('type', 'node')}"
+        )
+    if is_provider_action(action):
+        return await run_provider(
+            context, user_email, action, target, given or {}, row_limit, check_match, user_token
         )
     template = await load_template(context.id, action.get("templateId", ""), user_email)
     parameters, problems = bind_parameters(template, action, target, given or {}, strict=check_match)
@@ -335,6 +349,189 @@ async def run(
         row_count=response.row_count,
         # The warehouse may know of more rows than it returned (a byte cap): say so too.
         truncated=bool(response.truncated or (response.total_row_count or 0) > response.row_count),
+        duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+    )
+    return result
+
+
+# -- a registered table provider ----------------------------------------------------
+
+
+def _hint(spec) -> str:
+    """The declared description plus what the value must be, for whoever fills it."""
+    bounds = []
+    if spec.type != "str":
+        bounds.append(spec.type)
+    if spec.min is not None and spec.max is not None:
+        bounds.append(f"{spec.min:g} to {spec.max:g}")
+    elif spec.min is not None:
+        bounds.append(f"at least {spec.min:g}")
+    elif spec.max is not None:
+        bounds.append(f"at most {spec.max:g}")
+    said = (spec.description or "").strip()
+    return f"{said} ({', '.join(bounds)})" if said and bounds else said or ", ".join(bounds)
+
+
+def find_provider(context, action: dict, target: dict):
+    """The action's registered provider, if it serves this kind of item and context."""
+    from graphlagoon.services.table_providers import get_table_provider
+
+    name = action.get("provider") or ""
+    provider = get_table_provider(name)
+    if provider is None:
+        raise MenuActionError(
+            400, "TABLE_PROVIDER_NOT_REGISTERED", f"No table provider '{name}' is registered on this server"
+        )
+    kind = target.get("type", "node")
+    if kind not in provider.targets:
+        raise MenuActionError(
+            400, "TABLE_PROVIDER_TARGET", f"The provider '{provider.name}' has no table for a {kind}"
+        )
+    if provider.applies_to is not None and not provider.applies_to(context):
+        raise MenuActionError(
+            403, "TABLE_PROVIDER_NOT_ALLOWED", f"The provider '{provider.name}' is not available to this context"
+        )
+    return provider
+
+
+def bind_provider_parameters(
+    provider, action: dict, target: dict, given: dict[str, Any], strict: bool = True
+) -> tuple[list[dict], dict, dict]:
+    """``bind_parameters`` for a provider's declared parameters: each with its value
+    and origin, the ``problems``, and the typed values to hand the provider. A value
+    the action fixes (``params``) wins and cannot be changed by the caller."""
+    from graphlagoon.services.precomputed.params import ParamError, coerce_values
+
+    known = {p.name for p in provider.params}
+    problems: dict[str, str] = {
+        k: "the provider has no such parameter" for k in given if strict and k not in known
+    }
+    bindings = action.get("paramBindings") or {}
+    fixed = {k: v for k, v in (action.get("params") or {}).items() if v is not None and v != ""}
+    out, values = [], {}
+    for spec in provider.params:
+        name = spec.name
+        asked = _text(given.get(name)).strip()
+        if name in fixed:
+            value, origin = _text(fixed[name]), "default"
+            if strict and asked and asked != value.strip():
+                problems[name] = "is fixed by the action and cannot be changed"
+        elif asked:
+            value, origin = asked, "given"
+        elif bindings.get(name) and (bound := resolve_binding(bindings[name], target)):
+            value, origin = bound, "binding"
+        else:
+            value, origin = _text(spec.default), "default"
+        value = value.strip()
+        if not value:
+            values[name] = None
+            if spec.required:
+                problems.setdefault(name, "needs a value")
+        elif name not in problems:
+            try:
+                values[name] = coerce_values([spec], {name: value})[name]
+            except ParamError as e:
+                problems[name] = e.message
+        out.append({
+            "id": name,
+            "label": name,
+            "type": "select" if spec.choices else "input",
+            "options": list(spec.choices) if spec.choices else None,
+            "required": spec.required,
+            "description": _hint(spec) or None,
+            "binding": bindings.get(name),
+            "value": value,
+            "source": origin,
+            "locked": name in fixed,
+        })
+    return out, problems, values
+
+
+def _rows(columns: list[str], rows: list, row_limit: int) -> list[list[Optional[str]]]:
+    out = []
+    for row in rows[:row_limit]:
+        cells = [row.get(c) for c in columns] if isinstance(row, dict) else list(row)
+        cells = (cells + [None] * len(columns))[: len(columns)]
+        out.append([None if c is None else _text(c) for c in cells])
+    return out
+
+
+async def run_provider(
+    context, user_email: str, action: dict, target: dict, given: dict[str, Any],
+    row_limit: int, strict: bool, user_token: Optional[str],
+) -> dict:
+    """The provider half of ``run``: same result shape, never ``running``."""
+    import logging
+
+    from graphlagoon.services.table_providers import (
+        TableProviderError,
+        TableProviderRequest,
+        TableProviderResult,
+    )
+
+    provider = find_provider(context, action, target)
+    parameters, problems, values = bind_provider_parameters(provider, action, target, given, strict)
+    result: dict[str, Any] = {
+        "action_id": action["id"],
+        "label": action.get("label"),
+        "template_id": None,
+        "template_name": provider.label or provider.name,
+        "query_type": "provider",
+        "parameters": parameters,
+        "problems": problems,
+        "row_limit": row_limit,
+        "status": "needs_parameters",
+        "statement_id": None,
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+        "truncated": False,
+        "error": None,
+        "duration_ms": None,
+    }
+    if problems:
+        return result
+    request = TableProviderRequest(
+        context_id=context.id, user_email=user_email,
+        # The item's properties stay here: a provider gets what the action binds, nothing else.
+        target={k: v for k, v in target.items() if k != "properties"},
+        params=values, row_limit=row_limit, user_token=user_token,
+    )
+
+    async def call():
+        try:
+            return await provider.run(request)
+        except TimeoutError as e:  # the provider's own timeout is a failure, not ours
+            raise RuntimeError("the provider raised TimeoutError") from e
+
+    def failed(code: str, message: str) -> dict:
+        result.update(status="failed", error={"code": code, "message": message},
+                      duration_ms=round((time.perf_counter() - t0) * 1000, 1))
+        return result
+
+    t0 = time.perf_counter()
+    log = logging.getLogger(__name__)
+    try:
+        answer = await asyncio.wait_for(call(), provider.timeout_seconds)
+    except asyncio.TimeoutError:
+        return failed("TABLE_PROVIDER_TIMEOUT", f"The provider took longer than {provider.timeout_seconds:g}s")
+    except TableProviderError as e:
+        return failed("TABLE_PROVIDER_FAILED", str(e) or "The provider failed")
+    except Exception:  # never leak the provider's internals
+        log.exception("Table provider '%s' failed", provider.name)
+        return failed("TABLE_PROVIDER_FAILED", "The provider failed")
+    if not isinstance(answer, TableProviderResult) or not isinstance(answer.rows, list):
+        log.error("Table provider '%s' returned %s, not a TableProviderResult",
+                  provider.name, type(answer).__name__)
+        return failed("TABLE_PROVIDER_FAILED", "The provider failed")
+    columns = [str(c) for c in answer.columns]
+    rows = _rows(columns, answer.rows, row_limit)
+    result.update(
+        status="succeeded",
+        columns=columns,
+        rows=rows,
+        row_count=len(rows),
+        truncated=bool(answer.truncated or len(answer.rows) > row_limit),
         duration_ms=round((time.perf_counter() - t0) * 1000, 1),
     )
     return result

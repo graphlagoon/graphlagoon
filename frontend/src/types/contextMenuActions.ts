@@ -163,12 +163,28 @@ export interface ShowTableActionConfig extends MenuActionBase {
   paramBindings?: Record<string, string>;
 }
 
+/**
+ * Rows about the clicked item from a table provider the deployment registered in
+ * Python (it may call an internal service or another database). Runs on the server
+ * like a warehouse table: same window, same case canvas and agent tools.
+ */
+export interface RunTableProviderActionConfig extends MenuActionBase {
+  kind: 'run-table-provider';
+  /** A registered provider's name (/api/config `table_providers`). */
+  provider: string;
+  /** param name -> template resolved against the clicked item, e.g. { account: '{node_id}' }. */
+  paramBindings?: Record<string, string>;
+  /** param name -> a value fixed by the action: whoever runs it cannot change it. */
+  params?: Record<string, string | number | boolean>;
+}
+
 export type ContextMenuActionConfig =
   | OpenUrlActionConfig
   | CopyTextActionConfig
   | RunQueryTemplateActionConfig
   | ShowSameValueActionConfig
-  | ShowTableActionConfig;
+  | ShowTableActionConfig
+  | RunTableProviderActionConfig;
 
 export const CONTEXT_MENU_ACTION_KINDS = [
   'open-url',
@@ -176,6 +192,7 @@ export const CONTEXT_MENU_ACTION_KINDS = [
   'run-query-template',
   'show-same-value',
   'show-table',
+  'run-table-provider',
 ] as const;
 
 export const MAX_NEIGHBORHOOD_HOPS = 5;
@@ -187,9 +204,9 @@ export function isKnownActionKind(kind: string): boolean {
   return (CONTEXT_MENU_ACTION_KINDS as readonly string[]).includes(kind);
 }
 
-/** A run-query-template action whose rows open in a table instead of replacing the graph (the warehouse table). */
+/** An action whose rows the server returns: a query template shown as a table, or a registered table provider. */
 export function isTableAction(config: ContextMenuActionConfig): boolean {
-  return config.kind === 'run-query-template' && config.resultMode === 'table';
+  return config.kind === 'run-table-provider' || (config.kind === 'run-query-template' && config.resultMode === 'table');
 }
 
 /** Any action whose result is a table: from the warehouse or from the canvas. */

@@ -342,6 +342,21 @@ async function setupPage(page: Page) {
       enrichment_sources: ['main.graphs', 'main.hr', 'main.sales.orders'],
       enrichment_providers: [{
         name: 'lakebase-risk', label: 'Company risk (Lakebase)', description: 'risk_tier of each company, from the KYC table in Lakebase', targets: ['nodes'],
+        columns: ['risk_tier'],
+        params: [
+          { name: 'as_of_days', type: 'int', required: false, default: 30, description: 'How far back a review still counts', choices: null, min: 1, max: 365 },
+          { name: 'source', type: 'str', required: false, default: 'internal', description: 'Which register to read', choices: ['bureau', 'internal'], min: null, max: null },
+        ],
+      }],
+      table_providers: [{
+        name: 'orders-api', label: 'Orders (sales service)',
+        description: 'Orders of one company from the sales service, newest first. Use for recent purchases; one call per click.',
+        targets: ['node'],
+        params: [
+          { name: 'company', type: 'str', required: true, default: null, description: 'Company id', choices: null, min: null, max: null },
+          { name: 'days', type: 'int', required: false, default: 90, description: 'How many days back', choices: null, min: 1, max: 365 },
+          { name: 'status', type: 'str', required: false, default: 'any', description: 'Order status', choices: ['any', 'open', 'paid'], min: null, max: null },
+        ],
       }],
     };
     // Disables the stats-gl FPS overlay (see useDevPerf.ts) — the generator
@@ -463,7 +478,7 @@ const DEMO_ENRICHMENT_TABLES = [
     name: 'company_risk',
     label: 'Company risk (Lakebase)',
     description: 'Risk tier of each company from the risk service. Run before grouping or colouring by risk.',
-    provider: { name: 'lakebase-risk', target: 'nodes', run: 'manual' },
+    provider: { name: 'lakebase-risk', target: 'nodes', run: 'manual', params: { as_of_days: 90 }, runtime_params: ['as_of_days'] },
   },
 ];
 
@@ -626,6 +641,18 @@ const SCENES: Scene[] = [
       await page.getByTestId('edit-context-btn').first().click();
       await page.getByTestId('enrichment-query-block').nth(1).scrollIntoViewIfNeeded();
       await page.getByTestId('enrichment-section').evaluate((el) => el.scrollIntoView({ block: 'start' }));
+      await page.waitForTimeout(300);
+    },
+  },
+  {
+    // A provider entry in the context form: what it adds, its parameters, and what a run may change.
+    guide: 'bring-your-own-data',
+    scene: 'enrichment-provider',
+    path: '/contexts',
+    prepare: async (page) => {
+      await page.getByTestId('edit-context-btn').first().click();
+      await page.getByTestId('enrichment-provider-params').scrollIntoViewIfNeeded();
+      await page.getByTestId('enrichment-provider').evaluate((el) => el.closest('[data-testid="enrichment-row"]')!.scrollIntoView({ block: 'start' }));
       await page.waitForTimeout(300);
     },
   },
@@ -986,6 +1013,27 @@ const SCENES: Scene[] = [
       await menu.getByText('People within 2 hops').click();
       await page.getByTestId('menu-action-table-modal').locator('.p-datatable').waitFor({ timeout: 15_000 });
       await page.waitForTimeout(400);
+    },
+  },
+  {
+    // The action editor on "Table from a provider": the provider's description and its parameters.
+    guide: 'context-menu-actions',
+    scene: 'table-provider',
+    path: GRAPH_URL,
+    prepare: async (page) => {
+      await waitForGraphSettled(page);
+      await openLook(page, 'behaviors');
+      await page.getByTestId('behavior-open-menu-actions').click();
+      await page.getByTestId('menu-action-add').click();
+      await page.getByTestId('menu-action-label').fill('Orders of this company');
+      await page.getByTestId('menu-action-kind').selectOption('run-table-provider');
+      await page.getByTestId('menu-action-provider-select').selectOption('orders-api');
+      await page.getByTestId('menu-action-provider-how-company').selectOption('bind');
+      await page.getByTestId('menu-action-provider-value-company').fill('{node_id}');
+      await page.getByTestId('menu-action-provider-how-status').selectOption('fixed');
+      await page.getByTestId('menu-action-provider-value-status').selectOption('paid');
+      await page.getByTestId('menu-action-table-provider').scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
     },
   },
   {

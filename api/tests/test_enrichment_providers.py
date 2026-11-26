@@ -38,6 +38,7 @@ from graphlagoon.routers import graph_contexts  # noqa: E402
 from graphlagoon.services.enrichment_providers import (  # noqa: E402
     EnrichmentProvider,
     EnrichmentProviderError,
+    ParamSpec,
     clear_enrichment_provider_registry,
     get_enrichment_providers,
     register_enrichment_provider,
@@ -142,7 +143,8 @@ def test_public_config_lists_copy_and_targets_only(env):
     register_enrichment_provider(_provider(targets=("nodes",), description="Lakebase KYC"))
     config = asyncio.run(build_public_config(OWNER))
     assert config["enrichment_providers"] == [
-        {"name": "kyc-demo", "label": "KYC (demo)", "description": "Lakebase KYC", "targets": ["nodes"]}
+        {"name": "kyc-demo", "label": "KYC (demo)", "description": "Lakebase KYC", "targets": ["nodes"],
+         "params": [], "columns": []}
     ]
 
 
@@ -331,3 +333,153 @@ def test_an_entry_may_say_what_it_does_and_old_ones_read_the_same():
     assert EnrichmentTable(name="kyc", label="KYC", provider={"name": "kyc"}).description is None
     with pytest.raises(ValueError):
         EnrichmentTable(name="kyc", label="KYC", description="x" * 1001, provider={"name": "kyc"})
+
+
+# --- Parameters ---------------------------------------------------------------
+
+DAYS = ParamSpec("as_of_days", type="int", default=30, min=1, max=365, description="Window in days")
+SOURCE = ParamSpec("source", choices=["bureau", "internal"], default="internal")
+
+
+def _with_params(store, provider_ref):
+    entry = {**KYC, "provider": {**KYC["provider"], **provider_ref}}
+    ctx = store.create_graph_context(
+        "pix", "main.graphs.e", "main.graphs.n", OWNER, enrichment_tables=[entry]
+    )
+    store.share_graph_context(ctx.id, READER, "read")
+    return ctx
+
+
+def test_a_provider_declares_parameters_and_the_page_learns_them(env):
+    with pytest.raises(ValueError, match="min"):
+        register_enrichment_provider(_provider(params=[ParamSpec("n", type="int", min=5, max=1)]))
+    # A name the precomputed URL reserves is fine here: nothing comes from a URL.
+    register_enrichment_provider(_provider(params=[DAYS, SOURCE, ParamSpec("style")], columns=("risk",)))
+    payload = asyncio.run(build_public_config(OWNER))["enrichment_providers"][0]
+    assert [p["name"] for p in payload["params"]] == ["as_of_days", "source", "style"]
+    assert payload["params"][0] == {
+        "name": "as_of_days", "type": "int", "required": False, "default": 30,
+        "description": "Window in days", "choices": None, "min": 1, "max": 365,
+    }
+    assert payload["columns"] == ["risk"]
+
+
+def test_a_run_gets_the_defaults_then_the_context_values_typed(env):
+    client, store = env
+    recorder = _Recorder()
+    register_enrichment_provider(_provider(recorder, params=[DAYS, SOURCE]))
+    r = _run(client, _ctx(store))
+    assert r.status_code == 200, r.text
+    assert recorder.calls[-1].params == {"as_of_days": 30, "source": "internal"}
+    assert r.json()["params"] == {"as_of_days": 30, "source": "internal"}
+    ctx = _with_params(store, {"params": {"as_of_days": 90}})
+    assert _run(client, ctx).status_code == 200
+    assert recorder.calls[-1].params == {"as_of_days": 90, "source": "internal"}
+
+
+def test_a_run_changes_only_what_the_author_allowed(env):
+    client, store = env
+    recorder = _Recorder()
+    register_enrichment_provider(_provider(recorder, params=[DAYS, SOURCE]))
+    ctx = _with_params(store, {"params": {"as_of_days": 90}, "runtime_params": ["as_of_days"]})
+    r = _run(client, ctx, body={**BATCH, "params": {"as_of_days": 7}})
+    assert r.status_code == 200, r.text
+    assert recorder.calls[-1].params == {"as_of_days": 7, "source": "internal"}
+    calls = len(recorder.calls)
+    for params, said in (
+        ({"source": "bureau"}, "cannot be changed"),  # not listed by the author
+        ({"as_of_days": 9999}, "above the maximum"),
+        ({"as_of_days": "soon"}, "decimal"),
+    ):
+        r = _run(client, ctx, body={**BATCH, "params": params})
+        assert r.status_code == 400, r.text
+        error = r.json()["detail"]["error"]
+        assert error["code"] == "ENRICHMENT_PARAM_INVALID" and said in error["message"]
+    assert len(recorder.calls) == calls  # nothing ran
+    # An empty or null value means "not given": the context's stands.
+    assert _run(client, ctx, body={**BATCH, "params": {"as_of_days": None}}).status_code == 200
+    assert recorder.calls[-1].params["as_of_days"] == 90
+    audit = [a for a in InMemoryStore.get_instance().usage_logs if a.action == "enrichment.run"]
+    assert audit[0].log_metadata["params"] == {"as_of_days": 7, "source": "internal"}
+
+
+def test_save_refuses_values_the_provider_would_not_take(env):
+    client, store = env
+    register_enrichment_provider(_provider(params=[DAYS, ParamSpec("tenant", required=True)]))
+    ctx = store.create_graph_context("pix", "main.graphs.e", "main.graphs.n", OWNER)
+    url = f"/api/graph-contexts/{ctx.id}"
+
+    def save(ref):
+        entry = {**KYC, "provider": {**KYC["provider"], **ref}}
+        return client.put(url, json={"enrichment_tables": [entry]}, headers=_h(OWNER))
+
+    for ref, said in (
+        ({"params": {"tenant": "t", "as_of_days": 0}}, "below the minimum"),
+        ({"params": {"tenant": "t", "nope": 1}}, "Unknown parameter"),
+        ({"params": {"tenant": "t"}, "runtime_params": ["nope"]}, "declares no parameter"),
+        ({}, "required"),
+    ):
+        r = save(ref)
+        assert r.status_code == 400, r.text
+        error = r.json()["detail"]["error"]
+        assert error["code"] == "ENRICHMENT_PARAM_INVALID" and said in error["message"]
+    assert save({"params": {"tenant": "t"}}).status_code == 200
+    # A required one may be left to whoever runs it.
+    assert save({"runtime_params": ["tenant"]}).status_code == 200
+    store.share_graph_context(ctx.id, READER, "read")
+    assert _run(client, ctx).status_code == 400
+    assert _run(client, ctx, body={**BATCH, "params": {"tenant": "t"}}).status_code == 200
+
+
+def test_a_sql_entry_takes_no_parameters(env, monkeypatch):
+    client, store = env
+    monkeypatch.setenv("GRAPH_LAGOON_ENRICHMENT_SOURCES", "main.graphs")
+    get_settings.cache_clear()
+    entry = {"name": "risk", "label": "Risk", "table": "main.graphs.tx",
+             "query": {"sql": "SELECT edge_id FROM graph_edges"}}
+    ctx = store.create_graph_context("pix", "main.graphs.e", "main.graphs.n", OWNER, enrichment_tables=[entry])
+    r = _run(client, ctx, who=OWNER, body={**BATCH, "params": {"x": 1}}, name="risk")
+    assert r.status_code == 400 and r.json()["detail"]["error"]["code"] == "ENRICHMENT_PARAM_INVALID"
+
+
+# --- What reaches the provider, and what it may write ---------------------------
+
+
+def test_edge_properties_travel_only_when_asked_and_the_token_when_there_is_one(env):
+    client, store = env
+    recorder = _Recorder()
+    register_enrichment_provider(_provider(recorder))
+    body = {**BATCH, "edges": [{**BATCH["edges"][0], "properties": {"amount": 5}}]}
+    assert _run(client, _ctx(store), body=body).status_code == 200
+    assert recorder.calls[-1].edges[0]["properties"] == {} and recorder.calls[-1].user_token is None
+    ctx = _with_params(store, {"edge_props": True, "node_props": True})
+    r = client.post(
+        f"/api/graph-contexts/{ctx.id}/enrichment/kyc/run", json=body,
+        headers={**_h(READER), "X-Forwarded-Access-Token": "tok"},
+    )
+    assert r.status_code == 200, r.text
+    assert recorder.calls[-1].edges[0]["properties"] == {"amount": 5}
+    assert recorder.calls[-1].nodes[0]["properties"] == {"doc": "1"}
+    assert recorder.calls[-1].user_token == "tok"
+
+
+def test_declared_columns_are_the_only_ones_written(env):
+    client, store = env
+    register_enrichment_provider(_provider(columns=("risk",)))
+    body = _run(client, _ctx(store)).json()
+    assert body["columns"] == ["risk"] and body["rows"]["a"] == {"risk": 0.9}
+
+
+def test_a_provider_may_refuse_a_context_on_save_and_on_run(env):
+    client, store = env
+    allowed = {"ok": True}
+    register_enrichment_provider(_provider(applies_to=lambda context: allowed["ok"]))
+    ctx = _ctx(store)
+    assert _run(client, ctx).status_code == 200
+    allowed["ok"] = False
+    r = _run(client, ctx)
+    assert r.status_code == 403
+    assert r.json()["detail"]["error"]["code"] == "ENRICHMENT_PROVIDER_NOT_ALLOWED"
+    other = store.create_graph_context("pix2", "main.graphs.e", "main.graphs.n", OWNER)
+    r = client.put(f"/api/graph-contexts/{other.id}", json={"enrichment_tables": [KYC]}, headers=_h(OWNER))
+    assert r.status_code == 403

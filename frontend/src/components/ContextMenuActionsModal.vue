@@ -130,6 +130,10 @@
                 <li v-if="importWarnings.missingTemplateIds.length">
                   query template ids: {{ importWarnings.missingTemplateIds.join(', ') }}
                 </li>
+                <li v-if="importWarnings.missingProviders.length" data-testid="menu-action-import-missing-providers">
+                  table providers not registered on this server (these actions stay hidden):
+                  {{ importWarnings.missingProviders.join(', ') }}
+                </li>
                 <li v-if="importWarnings.sessionMetricRefs.length">
                   metrics (session-computed — these actions only work after the
                   metric is computed here): {{ importWarnings.sessionMetricRefs.join(', ') }}
@@ -172,6 +176,9 @@
                 <option value="run-query-template">Run query template</option>
                 <option value="show-same-value">Show only nodes with…</option>
                 <option value="show-table">Table from the canvas</option>
+                <option value="run-table-provider" :disabled="tableProviders.length === 0">
+                  Table from a provider{{ tableProviders.length === 0 ? ' (none registered on this server)' : '' }}
+                </option>
               </select>
 
               <label>Applies to</label>
@@ -412,6 +419,90 @@
               </div>
             </div>
 
+            <div v-else-if="editing.kind === 'run-table-provider'" class="kind-fields" data-testid="menu-action-table-provider">
+              <p class="hint">
+                Rows about the clicked item from code this deployment registered (for example a call to
+                an internal service). Runs on the server, opens in the same table window as a query
+                template's table, works on a case canvas, and agents can run it (<code>run_entity_action</code>).
+                <a :href="guideUrl('python-api', 'table-providers')" target="_blank" rel="noopener">How a provider is registered</a>
+              </p>
+              <label>Provider</label>
+              <select v-model="editingProvider" data-testid="menu-action-provider-select">
+                <option value="" disabled>— select a provider —</option>
+                <option v-for="p in tableProviders" :key="p.name" :value="p.name">{{ p.label }}</option>
+                <option v-if="editingProvider && !selectedProvider" :value="editingProvider">
+                  {{ editingProvider }} (not registered on this server)
+                </option>
+              </select>
+              <p v-if="editingProvider && !selectedProvider" class="hint warning" data-testid="menu-action-provider-missing">
+                Not registered on this server: the action stays hidden until the deployment registers it.
+              </p>
+              <template v-else-if="selectedProvider">
+                <p class="hint" data-testid="menu-action-provider-description">
+                  {{ selectedProvider.description || 'This provider has no description.' }}
+                  It has a table for: {{ selectedProvider.targets.map((t) => `${t}s`).join(' and ') }}.
+                </p>
+                <p v-if="providerTargetError" class="field-error" data-testid="menu-action-provider-target-error">{{ providerTargetError }}</p>
+                <div class="bindings">
+                  <div class="subsection-title">Parameters</div>
+                  <div
+                    v-for="p in selectedProvider.params ?? []"
+                    :key="p.name"
+                    class="provider-param"
+                    data-testid="menu-action-provider-param"
+                  >
+                    <div class="provider-param-head">
+                      <span class="binding-param">{{ p.name }}<span v-if="p.required" class="required">*</span></span>
+                      <span v-if="paramHint(p)" class="hint-inline">{{ paramHint(p) }}</span>
+                    </div>
+                    <div class="binding-row">
+                      <select
+                        v-model="editingProviderHow[p.name]"
+                        :aria-label="`Where ${p.name} comes from`"
+                        :data-testid="`menu-action-provider-how-${p.name}`"
+                      >
+                        <option value="run">
+                          {{ p.default === null || p.default === undefined ? 'Asked in the table window' : `Default (${paramText(p.default)}), editable in the window` }}
+                        </option>
+                        <option value="bind">From the clicked item</option>
+                        <option value="fixed">Fixed value (cannot be changed)</option>
+                      </select>
+                      <input
+                        v-if="editingProviderHow[p.name] === 'bind'"
+                        v-model="editingProviderText[p.name]"
+                        type="text"
+                        :placeholder="`{node_id} or {prop:...}`"
+                        :data-testid="`menu-action-provider-value-${p.name}`"
+                      />
+                      <select
+                        v-else-if="editingProviderHow[p.name] === 'fixed' && (p.choices?.length || p.type === 'bool')"
+                        v-model="editingProviderText[p.name]"
+                        :data-testid="`menu-action-provider-value-${p.name}`"
+                      >
+                        <option value="" disabled>— choose —</option>
+                        <option v-for="c in p.type === 'bool' ? ['true', 'false'] : p.choices!" :key="c" :value="c">{{ c }}</option>
+                      </select>
+                      <input
+                        v-else-if="editingProviderHow[p.name] === 'fixed'"
+                        v-model="editingProviderText[p.name]"
+                        type="text"
+                        placeholder="value"
+                        :data-testid="`menu-action-provider-value-${p.name}`"
+                      />
+                    </div>
+                    <p v-if="providerParamError(p)" class="field-error" data-testid="menu-action-provider-param-error">
+                      {{ p.name }} {{ providerParamError(p) }}
+                    </p>
+                  </div>
+                  <p v-if="!(selectedProvider.params ?? []).length" class="hint">This provider has no parameters.</p>
+                  <p v-else class="hint">
+                    From the clicked item: {{ placeholderHint }}. Give the provider the item's id this way
+                    (for example <code>{node_id}</code>): it receives the parameters, not the item's properties.
+                  </p>
+                </div>
+              </template>
+            </div>
+
             <div v-else class="kind-fields">
               <label>Query template</label>
               <select v-model="editingTemplateId" data-testid="menu-action-template-select">
@@ -502,6 +593,10 @@ import ContextMenuActionSkillModal from './ContextMenuActionSkillModal.vue';
 import JavaScriptEditor, { type EditorCompletion } from './JavaScriptEditor.vue';
 import { parseCanvasTableSource } from '@/utils/contextMenuActionImport';
 import { useMenuActionTable } from '@/composables/useMenuActionTable';
+import { configuredTableProviders } from '@/utils/enrichmentSources';
+import { paramHint, paramProblem, paramText, paramValues } from '@/utils/providerParams';
+import { guideUrl } from '@/utils/docsLinks';
+import type { ProviderParamInfo } from '@/types/graph';
 import type {
   CanvasTableSource,
   ContextMenuActionConfig,
@@ -576,6 +671,60 @@ const editingBindings = ref<Record<string, string>>({});
 const editingResultMode = ref<'graph' | 'table'>('graph');
 const editingField = ref('');
 const editingMode = ref<'same' | 'has'>('same');
+// run-table-provider (a table from a registered provider)
+const tableProviders = configuredTableProviders();
+const editingProvider = ref('');
+/** Per parameter: left to the table window, bound to the clicked item, or fixed by the action. */
+const editingProviderHow = ref<Record<string, 'run' | 'bind' | 'fixed'>>({});
+const editingProviderText = ref<Record<string, string>>({});
+const selectedProvider = computed(() => tableProviders.find((p) => p.name === editingProvider.value));
+
+function loadProvider(config?: { provider: string; paramBindings?: Record<string, string>; params?: Record<string, unknown> }) {
+  editingProvider.value = config?.provider ?? '';
+  const how: Record<string, 'run' | 'bind' | 'fixed'> = {};
+  const text: Record<string, string> = {};
+  for (const [k, v] of Object.entries(config?.paramBindings ?? {})) {
+    how[k] = 'bind';
+    text[k] = v;
+  }
+  for (const [k, v] of Object.entries(config?.params ?? {})) {
+    how[k] = 'fixed';
+    text[k] = paramText(v);
+  }
+  editingProviderHow.value = how;
+  editingProviderText.value = text;
+  defaultProviderHow();
+}
+
+/** Every declared parameter has a choice (default: left to the table window). */
+function defaultProviderHow() {
+  for (const p of selectedProvider.value?.params ?? []) {
+    if (!editingProviderHow.value[p.name]) editingProviderHow.value[p.name] = 'run';
+  }
+}
+watch(selectedProvider, defaultProviderHow);
+
+function providerParamError(p: ProviderParamInfo): string {
+  const how = editingProviderHow.value[p.name] ?? 'run';
+  const text = (editingProviderText.value[p.name] ?? '').trim();
+  if (how === 'run') return '';
+  if (!text) return how === 'bind' ? 'needs a template, e.g. {node_id}' : 'needs a value';
+  if (how === 'bind') {
+    const validation = validateTemplate(text);
+    return validation.valid ? '' : validation.errors[0];
+  }
+  return paramProblem(p, text);
+}
+
+const providerTargetError = computed(() => {
+  const provider = selectedProvider.value;
+  const target = editing.value?.match.target;
+  if (!provider || !target) return null;
+  const wanted = target === 'both' ? (['node', 'edge'] as const) : [target];
+  const unserved = wanted.find((t) => !provider.targets.includes(t));
+  return unserved ? `This provider has no table for ${unserved}s: change "Applies to".` : null;
+});
+
 // show-table (a table from the canvas)
 const editingTableSource = ref<'neighborhood' | 'program'>('neighborhood');
 const editingHops = ref(1);
@@ -728,11 +877,17 @@ const formValid = computed(() => {
   }
   if (draft.kind === 'show-same-value') return editingField.value.trim() !== '';
   if (draft.kind === 'show-table') return !canvasSourceError.value;
+  if (draft.kind === 'run-table-provider') {
+    // One not registered here is kept as it was (it may be registered later); a new one must exist.
+    if (!selectedProvider.value) return editingProvider.value !== '' && !isNew.value;
+    return !providerTargetError.value && !(selectedProvider.value.params ?? []).some((p) => providerParamError(p));
+  }
   return editingTemplateId.value !== '';
 });
 
 function kindIconFallback(kind: ContextMenuActionConfig['kind']): string {
-  return kind === 'open-url' ? '🔗' : kind === 'copy-text' ? '📋' : kind === 'show-same-value' ? '◎' : kind === 'show-table' ? '▦' : '▶';
+  return kind === 'open-url' ? '🔗' : kind === 'copy-text' ? '📋' : kind === 'show-same-value' ? '◎'
+    : kind === 'show-table' || kind === 'run-table-provider' ? '▦' : '▶';
 }
 
 function actionSummary(config: ContextMenuActionConfig): string {
@@ -747,6 +902,10 @@ function actionSummary(config: ContextMenuActionConfig): string {
     const what = src.list === 'edges' ? `edges${src.listEdgeTypes?.length ? ` ${src.listEdgeTypes.join('/')}` : ''}` : 'nodes';
     const types = src.nodeTypes?.length ? ` of ${src.nodeTypes.join('/')}` : '';
     return `canvas table · ${what}${types} within ${src.hops} hop${src.hops === 1 ? '' : 's'}`;
+  }
+  if (config.kind === 'run-table-provider') {
+    const provider = tableProviders.find((p) => p.name === config.provider);
+    return provider ? `provider table · ${provider.label}` : `provider table · ${config.provider} (not registered on this server)`;
   }
   const name = config.templateName || config.templateId;
   return config.resultMode === 'table' ? `${name} · table` : name;
@@ -774,6 +933,7 @@ function startCreate() {
   editingField.value = '';
   editingMode.value = 'same';
   loadCanvasSource(undefined);
+  loadProvider(undefined);
 }
 
 function loadCanvasSource(source: CanvasTableSource | undefined) {
@@ -815,6 +975,7 @@ function startEdit(config: ContextMenuActionConfig) {
   editingMode.value = config.kind === 'show-same-value' ? config.mode : 'same';
   loadCanvasSource(config.kind === 'show-table' ? config.source : undefined);
   if (config.kind === 'show-table') editingBindings.value = { ...(config.paramBindings ?? {}) };
+  loadProvider(config.kind === 'run-table-provider' ? config : undefined);
 }
 
 function addCondition() {
@@ -864,6 +1025,25 @@ function buildConfig(): ContextMenuActionConfig | null {
       Object.entries(editingBindings.value).filter(([k, v]) => ids.has(k) && v.trim() !== ''),
     );
     return { ...base, kind: 'show-table', source, ...(Object.keys(bindings).length ? { paramBindings: bindings } : {}) };
+  }
+  if (draft.kind === 'run-table-provider') {
+    const provider = selectedProvider.value;
+    const names = provider ? (provider.params ?? []).map((p) => p.name) : Object.keys(editingProviderHow.value);
+    const pick = (how: 'bind' | 'fixed') =>
+      Object.fromEntries(
+        names
+          .filter((n) => editingProviderHow.value[n] === how && (editingProviderText.value[n] ?? '').trim() !== '')
+          .map((n) => [n, editingProviderText.value[n].trim()]),
+      );
+    const bindings = pick('bind');
+    const fixed = paramValues(provider?.params, pick('fixed'));
+    return {
+      ...base,
+      kind: 'run-table-provider',
+      provider: editingProvider.value,
+      ...(Object.keys(bindings).length ? { paramBindings: bindings } : {}),
+      ...(Object.keys(fixed).length ? { params: fixed } : {}),
+    };
   }
   return {
     ...base,
@@ -1344,6 +1524,24 @@ function close() {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+
+.provider-param {
+  margin-bottom: 8px;
+}
+
+.provider-param-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.provider-param .binding-row > select,
+.provider-param .binding-row > input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
 }
 
 .binding-row {

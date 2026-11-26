@@ -528,6 +528,13 @@ class EnrichmentProviderRef(BaseModel):
     run: Literal["auto", "manual"] = "manual"
     overwrite: bool = False
     node_props: bool = False
+    # Edge properties reach the provider only when asked for, like node ones.
+    edge_props: bool = False
+    # Values for the parameters the provider declares; checked against its
+    # declaration on save and on run, not here (see ``provider`` below).
+    params: dict[str, Union[bool, int, float, str]] = Field(default_factory=dict, max_length=32)
+    # The parameters whoever runs it may change. Empty: none.
+    runtime_params: list[str] = Field(default_factory=list, max_length=32)
 
 
 class EnrichmentTable(BaseModel):
@@ -648,16 +655,21 @@ class MenuActionParameter(BaseModel):
     binding: Optional[str] = None
     value: str = ""
     source: Literal["given", "binding", "default"] = "default"
+    # A provider action's fixed value: shown, not changeable by whoever runs it.
+    locked: bool = False
 
 
 class MenuActionTableResponse(BaseModel):
     """``status``: ``needs_parameters`` (nothing ran; ``problems`` per parameter),
     ``running`` (poll ``GET .../query/table/{statement_id}``), ``succeeded`` or
-    ``failed`` (``error``: the warehouse's code and message)."""
+    ``failed`` (``error``: the warehouse's code and message). A
+    ``run-table-provider`` action has no template: ``template_id`` is null,
+    ``template_name`` its provider's label, ``query_type`` "provider", and it is
+    never ``running``."""
 
     action_id: str
     label: Optional[str] = None
-    template_id: str
+    template_id: Optional[str] = None
     template_name: str
     query_type: str
     parameters: list[MenuActionParameter]
@@ -693,6 +705,10 @@ class EnrichmentRunRequest(BaseModel):
 
     edges: list[EnrichmentRunEdge] = Field(default_factory=list)
     nodes: list[EnrichmentRunNode] = Field(default_factory=list)
+    # A provider entry only: values for the parameters its author lets a run change.
+    params: Optional[dict[str, Union[bool, int, float, str, None]]] = Field(
+        default=None, max_length=32
+    )
 
 
 class EnrichmentRunResponse(BaseModel):
@@ -703,6 +719,8 @@ class EnrichmentRunResponse(BaseModel):
     rows: dict[str, dict[str, Any]]
     truncated: bool = False
     query_ms: Optional[float] = None
+    # A provider entry: the parameter values it ran with.
+    params: Optional[dict[str, Any]] = None
 
 
 # Graph Context models
@@ -770,12 +788,13 @@ class GraphContextCreate(BaseModel):
     context_menu_actions: list[dict] = Field(
         default_factory=list,
         description="Context-level configurable context-menu actions (open-url, "
-        "copy-text, run-query-template, show-same-value, show-table). Passed through opaquely; "
+        "copy-text, run-query-template, show-same-value, show-table, run-table-provider). Passed through opaquely; "
         "the frontend owns the shape. A run-query-template action with resultMode 'table' also "
         "runs on the server: POST /api/graph-contexts/{id}/menu-actions/{action_id}/table. A "
         "show-table action computes its rows in the browser from the loaded graph (a neighbors "
         "walk or a sandboxed JavaScript program); agents run its neighbors walk on a case graph "
-        "through the MCP tool run_entity_action.",
+        "through the MCP tool run_entity_action. A run-table-provider action runs a table provider "
+        "the deployment registered (provider, paramBindings, params) through the same route.",
     )
     metric_definitions: list[MetricDefinition] = Field(
         default_factory=list,

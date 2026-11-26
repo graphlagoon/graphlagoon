@@ -1010,7 +1010,8 @@ def build_server():
         return await _save_exploration(user, loaded, "query_into_exploration", snapshot, overlay, report, info=info,
                                        state_changes={"graph_query": query} if mode == "replace" else None)
 
-    async def _run_enrichment(user: str, loaded, context, spec: dict, node_ids: Optional[list[str]], overwrite: bool) -> dict:
+    async def _run_enrichment(user: str, loaded, context, spec: dict, node_ids: Optional[list[str]], overwrite: bool,
+                              params: Optional[dict] = None) -> dict:
         """The ``run`` half of enrich_exploration: the entry's query or provider over
         the saved graph, its values saved with the provenance the page records."""
         from graphlagoon.models.schemas import EnrichmentRunEdge, EnrichmentRunNode
@@ -1034,7 +1035,7 @@ def build_server():
             if target == "edges":
                 only = {e.edge_id for e in edges if e.src in only or e.dst in only}
         try:
-            result = await enrichment.run_over_graph(get_warehouse_client(), context, spec["name"], nodes, edges, user, only)
+            result = await enrichment.run_over_graph(get_warehouse_client(), context, spec["name"], nodes, edges, user, only, params)
         except enrichment.EnrichmentError as exc:
             raise _tool_error(exc.code, exc.message) from exc
         label = spec.get("label") or spec["name"]
@@ -1068,11 +1069,17 @@ def build_server():
         await audit.record(
             user, AuditAction.ENRICHMENT_RUN, resource_type="graph_context", resource_id=context.id,
             metadata={"query": spec["name"], "target": target, "edges": len(edges), "nodes": len(nodes),
-                      "rows": len(result["rows"]), "truncated": result["truncated"], "tool": "enrich_exploration"},
+                      "rows": len(result["rows"]), "truncated": result["truncated"], "tool": "enrich_exploration",
+                      **({"params": result["params"]} if result.get("params") else {})},
         )
         info = {"table": spec["name"], "how": "run", "target": target, "targets": result["targets"],
                 "matched": len(result["rows"]), "written": len(written), "columns": result["columns"],
                 "truncated": result["truncated"]}
+        if result.get("params"):
+            info["params"] = result["params"]
+        if result.get("error"):
+            # Some batches ran before one failed: what they returned is saved.
+            info.update(partial=True, error=result["error"])
         return await _save_exploration(user, loaded, "enrich_exploration", snapshot, overlay, report, info=info)
 
     @tool("list_enrichments")
@@ -1087,7 +1094,11 @@ def build_server():
         lookup_enrichment reads its rows for one entity of a case.
         ``run``: a SQL ``query`` (its ``sql`` is given) or a ``provider`` (code
         the deployment registered; ``registered`` false means it cannot run
-        here) computed over the graph, writing ``target`` nodes or edges.
+        here) computed over the graph, writing ``target`` nodes or edges. A
+        provider also gives ``columns`` (the properties it writes, when
+        declared) and ``params``: each parameter's type, bounds, ``choices``,
+        the ``value`` this context sets, and ``overridable`` (true: you may
+        pass another value to enrich_exploration; false: fixed by the author).
         ``mode`` "auto" runs by itself when a person loads a query; "manual"
         only when asked. enrich_exploration with how="run" runs either.
         ``authorized_tables`` are the tables those queries may read. In a
@@ -1115,7 +1126,8 @@ def build_server():
     async def enrich_exploration(ctx: Context, exploration_id: UUID, table: str,
                                  node_ids: Optional[list[str]] = None, overwrite: bool = False,
                                  promote: bool = False, expected_revision: Optional[int] = None,
-                                 how: Optional[str] = None) -> dict:
+                                 how: Optional[str] = None,
+                                 params: Optional[dict[str, Any]] = None) -> dict:
         """Run enrichment ``table`` (a name from list_enrichments, which says what
         each one adds and when to use it) on the exploration and save the values
         as properties. ``how`` picks what the entry does: "lookup" (its default
@@ -1130,7 +1142,13 @@ def build_server():
         those of ``node_ids`` (for edges: the ones touching them). A value
         already there stays unless the entry or ``overwrite`` says otherwise;
         values the same enrichment wrote before are refreshed. An entry with
-        ``mode: "manual"`` runs only when someone asks, like this."""
+        ``mode: "manual"`` runs only when someone asks, like this. ``params``
+        sets a provider's parameters that list_enrichments marks
+        ``overridable`` (e.g. {"as_of_days": 90}); the others keep the
+        context's values. The result's ``params`` are the values it ran with.
+        ``partial: true`` with ``error`` means a later batch failed: what the
+        earlier ones returned was saved; ``truncated`` means not every node or
+        edge was reached."""
         from graphlagoon.routers.graph_contexts import run_enrichment_lookup
         from graphlagoon.services.warehouse import get_warehouse_client
         from graphlagoon.utils.context_access import get_context_with_access
@@ -1151,7 +1169,9 @@ def build_server():
         if mode == "run":
             if promote:
                 raise _tool_error("NOT_PROMOTABLE", "promote belongs to a lookup, not to a query or provider run")
-            return await _run_enrichment(user, loaded, context, spec, node_ids, overwrite)
+            return await _run_enrichment(user, loaded, context, spec, node_ids, overwrite, params)
+        if params:
+            raise _tool_error("ENRICHMENT_PARAM_INVALID", "params belong to a provider run (how=\"run\"), not to a lookup")
         if not spec.get("key_column"):
             raise _tool_error("ENRICHMENT_NOT_LOOKUP", f"'{table}' declares no lookup by node key; run it with how=\"run\"")
         if promote and not spec.get("promote"):
@@ -1529,7 +1549,9 @@ def build_server():
         days"): each with its parameters, the value each one would take for this
         entity, and what is still missing. Run one with run_entity_action.
         ``source`` says where the rows come from: "warehouse" (a query
-        template) or "canvas" (computed from the case graph: a neighbors walk,
+        template), "provider" (code the deployment registered, e.g. a call to
+        an internal service; ``description`` says what it returns; a parameter
+        with ``locked: true`` is fixed by the action) or "canvas" (computed from the case graph: a neighbors walk,
         which runs here, or a JavaScript program, ``runs_in: "browser"``,
         listed with its code for reference)."""
         from graphlagoon.services import menu_action_tables as mat
@@ -1541,6 +1563,19 @@ def build_server():
         for context, target in contexts:
             for action in mat.table_actions(context):
                 if not mat.matches(action, target):
+                    continue
+                if mat.is_provider_action(action):
+                    try:
+                        provider = mat.find_provider(context, action, target)
+                    except mat.MenuActionError:
+                        continue  # not registered here, or not for this item or context
+                    parameters, problems, _ = mat.bind_provider_parameters(provider, action, target, {})
+                    actions.append({
+                        "context_id": str(context.id), "action_id": action["id"], "label": action.get("label"),
+                        "provider": provider.name, "description": provider.description or None,
+                        "query_type": "provider", "parameters": parameters, "missing": problems,
+                        "source": "provider", "runs_in": "server",
+                    })
                     continue
                 try:
                     template = await mat.load_template(context.id, action.get("templateId", ""), user)

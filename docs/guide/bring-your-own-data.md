@@ -215,7 +215,18 @@ A **provider** is code the deployment registered in Python (see
 gets and returns new properties per edge or node id, reading whatever the server can reach, typically a
 Lakebase table. When the server has any, the **Enrichments** header shows **+ Attach provider**: pick
 the provider, what it enriches (only the targets it supports are offered), when it runs, and the same
-**Replace values** and **Send node properties** switches as a query. A provider entry has no table and no SQL.
+**Replace values** and **Send node properties** switches as a query, plus **Send edge properties** (off by
+default: the provider gets ids and types only). A provider entry has no table and no SQL. When the provider
+declares the properties it writes, the form shows them (*Adds: kyc_tier, kyc_score*).
+
+A provider may declare **parameters** (a window in days, which source to read). The form shows one field per
+parameter with its type and limits; leave a field empty to use the provider's default. Tick **Can be changed
+when running** on the ones whoever runs the enrichment by hand may set: they then appear in **Your data →
+Context enrichments** next to **Run**, and an AI agent may pass them. Unticked, your value is the only one
+ever used. An enrichment that runs after every query always uses the context's values; the run's line in
+**Your data** and in the Enrichment chip says which values it used.
+
+![A provider entry in the context form: what it adds, its parameters and which ones a run may change](/screenshots/bring-your-own-data-enrichment-provider.png)
 
 ```yaml
 enrichment_tables:
@@ -226,6 +237,8 @@ enrichment_tables:
       name: lakebase-kyc        # a provider registered on this server
       target: nodes
       run: auto
+      params: {as_of_days: 90}  # values for the parameters it declares
+      runtime_params: [as_of_days]   # what a run by hand (or an agent) may change
 ```
 
 Attaching one needs the same **Create graph contexts** permission; running it needs read access to the
@@ -243,8 +256,10 @@ The **Enrichments** header has three helpers besides **+ Attach table** (and **+
 - **Export YAML** shows the current entries as YAML (and copies them), to edit, review or move to another
   context.
 - **Ask an AI** builds a prompt for any AI assistant with this context's tables, columns, properties, types and
-  current entries, plus the rules above. Describe what you want at the end; paste the YAML it answers into
-  **Import YAML**. The prompt holds table and column names, no data.
+  current entries, plus the rules above and **every enrichment provider registered on the server**: its
+  name, what it adds, what it enriches, the properties it writes and each parameter with its type, default
+  and limits. Describe what you want at the end; paste the YAML it answers into **Import YAML**. The prompt
+  holds table and column names, no data.
 
 ![The context form: Enrichments with Import YAML and Ask an AI](/screenshots/bring-your-own-data-enrichment-tables.png)
 
@@ -322,6 +337,8 @@ enrichment_tables:
 | `ENRICHMENT_PROVIDER_FAILED` | The provider raised an error; its message is shown when the provider wrote one for you, otherwise *The provider failed* (the server log names it). |
 | `ENRICHMENT_PROVIDER_TIMEOUT` | The provider did not answer within its timeout (set by whoever registered it). |
 | `ENRICHMENT_PROVIDER_NOT_REGISTERED`, `ENRICHMENT_PROVIDER_TARGET` | The provider is not on this server (any more), or does not enrich the target the entry asks for. |
+| `ENRICHMENT_PROVIDER_NOT_ALLOWED` | The deployment restricts this provider to other contexts. |
+| `ENRICHMENT_PARAM_INVALID` | A provider parameter is unknown, of the wrong type or outside its limits, a required one has no value, or a run tried to change one the context's author did not open. The message names it. |
 | *the result hit the row limit* | More rows than `GRAPH_LAGOON_ENRICHMENT_MAX_ROWS` came back for one batch; some edges may be missing values. |
 
 Edges travel in batches of `GRAPH_LAGOON_ENRICHMENT_MAX_KEYS` (500 by default), each with its endpoint nodes;

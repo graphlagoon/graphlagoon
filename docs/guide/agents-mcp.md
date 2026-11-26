@@ -205,11 +205,16 @@ attached: a table looked up by a node key, a SQL query over the graph, or a prov
 1. **Discover.** `list_enrichments(context_id)` returns each one with its `description` (what it adds and when
    to use it, as the author wrote it; a provider's registered description when the author wrote none), whether
    it is a `lookup` or a `run`, what it targets (nodes or edges), whether it runs by itself for people
-   (`mode: auto`) or only when asked (`manual`), a query's SQL, and the context's authorized tables.
+   (`mode: auto`) or only when asked (`manual`), a query's SQL, and the context's authorized tables. A
+   provider also lists the properties it writes (`columns`, when declared) and its `params`: type, limits,
+   the value the context sets, and `overridable` (whether the agent may pass another).
 2. **Run.** `enrich_exploration(exploration_id, table)` runs it over the saved graph and saves the values as
    properties: a lookup by default when the entry has one, `how="run"` for its query or provider. `node_ids`
-   narrows it to some nodes (or the edges touching them). The agent needs what a person needs: read access to
-   the context and write access to the exploration. A run is audited as `enrichment.run`.
+   narrows it to some nodes (or the edges touching them). `params` sets the provider parameters the author
+   left open; any other is refused. The agent needs what a person needs: read access to the context and write
+   access to the exploration. A run is audited as `enrichment.run`, with the values used. A long run stops
+   after 20 batches or 120 seconds (`truncated`), and a batch that fails after others succeeded keeps what
+   those returned (`partial`, with the error).
 3. **Read.** The values are in the exploration (`get_exploration`) and in every case that holds it
    (`get_graph`, `get_entity`), marked as written by that enrichment, so a person's next **Run** refreshes
    them instead of treating them as the graph's own.
