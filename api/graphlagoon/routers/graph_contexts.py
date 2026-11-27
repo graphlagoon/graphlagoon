@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from uuid import UUID
 from typing import TYPE_CHECKING, Optional, Union
 
@@ -336,16 +336,10 @@ def context_to_response(
     )
 
 
-@router.get("", response_model=list[GraphContextResponse])
-async def list_graph_contexts(request: Request):
-    """List graph contexts the user has access to.
-
-    Returns contexts where the user:
-    - Owns the context, OR
-    - Has a context-level share (GraphContextShare), OR
-    - Has an exploration-level share (ExplorationShare) for any exploration in the context
-    """
-    user_email = get_current_user(request)
+async def accessible_contexts(user_email: str) -> list:
+    """The contexts ``user_email`` can read, newest first: owned, shared with them
+    (directly or through a group), or holding an exploration shared with them.
+    Shared by the list route and the agent's ``list_contexts``."""
     if not is_superuser(user_email):
         await prime_group_shares(user_email)  # group shares count as grants below
 
@@ -388,31 +382,43 @@ async def list_graph_contexts(request: Request):
             result = await session.execute(
                 query.order_by(GraphContext.updated_at.desc())
             )
-            contexts = result.scalars().all()
-            return [context_to_response(ctx, user_email) for ctx in contexts]
-    else:
-        store = get_memory_store()
-        if is_superuser(user_email):
-            accessible = list(store.graph_contexts.values())
-        else:
-            accessible = []
-            for ctx in store.graph_contexts.values():
-                if ctx.owner_email == user_email:
-                    accessible.append(ctx)
-                    continue
-                if user_has_share_access(user_email, ctx.shares):
-                    accessible.append(ctx)
-                    continue
-                # Check exploration-level shares
-                for exp in store.explorations.values():
-                    if exp.graph_context_id == ctx.id and user_has_share_access(
-                        user_email, exp.shares
-                    ):
-                        accessible.append(ctx)
-                        break
+            return list(result.scalars().all())
 
-        accessible.sort(key=lambda c: c.updated_at, reverse=True)
-        return [context_to_response(ctx, user_email) for ctx in accessible]
+    store = get_memory_store()
+    if is_superuser(user_email):
+        accessible = list(store.graph_contexts.values())
+    else:
+        accessible = []
+        for ctx in store.graph_contexts.values():
+            if ctx.owner_email == user_email:
+                accessible.append(ctx)
+                continue
+            if user_has_share_access(user_email, ctx.shares):
+                accessible.append(ctx)
+                continue
+            # Check exploration-level shares
+            for exp in store.explorations.values():
+                if exp.graph_context_id == ctx.id and user_has_share_access(
+                    user_email, exp.shares
+                ):
+                    accessible.append(ctx)
+                    break
+
+    accessible.sort(key=lambda c: c.updated_at, reverse=True)
+    return accessible
+
+
+@router.get("", response_model=list[GraphContextResponse])
+async def list_graph_contexts(request: Request):
+    """List graph contexts the user has access to.
+
+    Returns contexts where the user:
+    - Owns the context, OR
+    - Has a context-level share (GraphContextShare), OR
+    - Has an exploration-level share (ExplorationShare) for any exploration in the context
+    """
+    user_email = get_current_user(request)
+    return [context_to_response(ctx, user_email) for ctx in await accessible_contexts(user_email)]
 
 
 @router.post("", response_model=GraphContextResponse)
@@ -1073,6 +1079,41 @@ async def run_menu_action_table(
             status_code=e.status,
             detail={"error": {"code": e.code, "message": e.message, "details": {}}},
         )
+
+
+@router.get("/{context_id}/catalog")
+async def get_context_catalog(
+    context_id: UUID,
+    request: Request,
+    tables: list[str] = Query(default_factory=list),
+    warehouse: WarehouseClient = Depends(get_warehouse),
+):
+    """The context as a data catalog, for whoever reads it without a graph on screen
+    (an agent's ``describe_context``): its graph tables and their column mapping, node
+    and relationship types, properties, the tables it authorizes and the sources its
+    author declared (lookups, enrichment queries, providers). ``tables`` (repeatable,
+    up to 10, each one of the context's) adds the warehouse's own metadata for those
+    tables: column names, types and comments. Needs read access to the context."""
+    from graphlagoon.services import context_catalog
+    from graphlagoon.utils.context_access import get_context_with_access
+
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+    out = context_catalog.catalog(context)
+    if tables:
+        try:
+            described = await context_catalog.table_columns(warehouse, context, tables)
+        except context_catalog.CatalogError as e:
+            raise HTTPException(
+                status_code=e.status,
+                detail={"error": {"code": e.code, "message": e.message, "details": {}}},
+            )
+        by_name = {d["table"]: d for d in described}
+        for table in out["tables"]:
+            if table["table"] in by_name:
+                table.update(reachable=by_name[table["table"]]["reachable"],
+                             columns=by_name[table["table"]]["columns"])
+    return out
 
 
 @router.post("/{context_id}/enrichment/{name}/run", response_model=EnrichmentRunResponse)

@@ -994,9 +994,14 @@ async function submit() {
           <textarea
             v-model="form.description"
             class="form-control"
-            rows="3"
-            placeholder="Optional description..."
+            rows="5"
+            placeholder="What this graph is. What each node type is, what each relationship means and in which direction (HOLDS: person → account), and what to be careful with."
+            data-testid="context-description"
           ></textarea>
+          <p class="hint" data-testid="context-description-hint">
+            People see this on the context card. AI agents read it first when they look at this context's data:
+            say what each type and relationship means, its direction, and the data's caveats.
+          </p>
         </div>
 
         <!-- Everything below is table-backed configuration; a native graph

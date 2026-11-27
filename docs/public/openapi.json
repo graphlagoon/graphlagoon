@@ -1574,6 +1574,60 @@
         }
       }
     },
+    "/graphlagoon/api/graph-contexts/{context_id}/catalog": {
+      "get": {
+        "tags": [
+          "graph-contexts"
+        ],
+        "summary": "Get Context Catalog",
+        "description": "The context as a data catalog, for whoever reads it without a graph on screen\n(an agent's ``describe_context``): its graph tables and their column mapping, node\nand relationship types, properties, the tables it authorizes and the sources its\nauthor declared (lookups, enrichment queries, providers). ``tables`` (repeatable,\nup to 10, each one of the context's) adds the warehouse's own metadata for those\ntables: column names, types and comments. Needs read access to the context.",
+        "operationId": "graph_contexts_get_context_catalog",
+        "parameters": [
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Context Id"
+            }
+          },
+          {
+            "name": "tables",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "title": "Tables"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/graphlagoon/api/graph-contexts/{context_id}/enrichment/{name}/run": {
       "post": {
         "tags": [
