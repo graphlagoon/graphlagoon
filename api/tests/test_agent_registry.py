@@ -62,10 +62,15 @@ ALL_ROUTES |= {
     if "/enrichment/" in k[1]
     or "/menu-actions/" in k[1]
     or k == ("GET", "/api/graph-contexts/{context_id}")
+    # The context as a data catalog: listing, describing, and (below) the console's table query.
+    or k == ("GET", "/api/graph-contexts")
+    or k == ("GET", "/api/graph-contexts/{context_id}/catalog")
 }
 # Of the graph routes, the two that change an exploration's graph through a tool.
 ALL_ROUTES |= {
-    k: v for k, v in _routes(graph.router).items() if k[1].endswith(("/expand", "/cypher"))
+    k: v
+    for k, v in _routes(graph.router).items()
+    if k[1].endswith(("/expand", "/cypher")) or k == ("POST", "/api/graph-contexts/{context_id}/query/table")
 }
 
 

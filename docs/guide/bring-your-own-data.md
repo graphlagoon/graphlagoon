@@ -204,6 +204,10 @@ above 5 000 nodes."* It is shown under the enrichment in **Your data → Context
 status-bar chip, and it is what an [AI agent](./agents-mcp.md#enrichments) reads to decide whether to run
 one. Without it, people see the name only, and a provider shows the description the deployment registered.
 
+An AI agent can also read what a source knows about some ids without saving anything
+(`query_source`), and finds the sources of a context with `describe_context`: see
+[A context as a data catalog](./agents-mcp.md#a-context-as-a-data-catalog).
+
 An enrichment set to run **only from Your data** never runs by itself: a person runs it there, or an agent
 runs it on a saved exploration with `enrich_exploration`. Use that for one that is slow, costly, or only
 relevant to some questions, and say so in its description.

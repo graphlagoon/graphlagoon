@@ -8,7 +8,7 @@ outline: [2, 3]
 
 ::: v-pre
 
-Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/list` (50 tools). How to connect, what arrives suggested and what agents never do: [AI Agents (MCP)](./agents-mcp.md). Each tool mirrors a REST route a person uses (*human twin*); case data comes back wrapped in `untrusted_data`.
+Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/list` (54 tools). How to connect, what arrives suggested and what agents never do: [AI Agents (MCP)](./agents-mcp.md). Each tool mirrors a REST route a person uses (*human twin*); case data comes back wrapped in `untrusted_data`.
 
 | Group | Tools |
 |---|---|
@@ -16,6 +16,7 @@ Every tool of the MCP server at `{prefix}/mcp`, as an agent sees it in `tools/li
 | Brief and material | [`get_brief`](#get-brief), [`write_brief`](#write-brief), [`list_items`](#list-items), [`read_item`](#read-item), [`update_item`](#update-item), [`search_case`](#search-case) |
 | Adding material | [`add_note`](#add-note), [`add_document`](#add-document), [`add_table`](#add-table), [`save_query`](#save-query), [`import_file`](#import-file), [`upload_file`](#upload-file), [`add_item`](#add-item) |
 | Explorations | [`list_explorations`](#list-explorations), [`get_exploration`](#get-exploration), [`create_exploration`](#create-exploration), [`edit_exploration`](#edit-exploration), [`expand_exploration`](#expand-exploration), [`query_into_exploration`](#query-into-exploration), [`list_enrichments`](#list-enrichments), [`enrich_exploration`](#enrich-exploration) |
+| Contexts and sources | [`list_contexts`](#list-contexts), [`describe_context`](#describe-context), [`query_context`](#query-context), [`query_source`](#query-source) |
 | Queries and tables | [`run_query`](#run-query), [`join_tables`](#join-tables), [`compare_tables`](#compare-tables), [`promote_tables`](#promote-tables) |
 | Annotations and evidence | [`annotate`](#annotate), [`group`](#group), [`list_annotations`](#list-annotations), [`pin_evidence`](#pin-evidence) |
 | Tasks | [`list_tasks`](#list-tasks), [`add_task`](#add-task), [`update_task`](#update-task) |
@@ -397,7 +398,7 @@ Human twin: `POST /api/graph-contexts/{context_id}/cypher`, `PUT /api/exploratio
 
 ### list_enrichments
 
-The enrichments of a context (``context_id`` of an exploration or a case's graph item): extra data its author attached, to add as properties of the nodes or edges on a graph. Each has ``name`` (what the other tools take), ``label``, ``description`` (what it adds and when to use it, when the author wrote one) and one or both of: ``lookup``: a table read by a node key (``match_node_types``, ``columns``); enrich_exploration saves its columns on an exploration, lookup_enrichment reads its rows for one entity of a case. ``run``: a SQL ``query`` (its ``sql`` is given) or a ``provider`` (code the deployment registered; ``registered`` false means it cannot run here) computed over the graph, writing ``target`` nodes or edges. A provider also gives ``columns`` (the properties it writes, when declared) and ``params``: each parameter's type, bounds, ``choices``, the ``value`` this context sets, and ``overridable`` (true: you may pass another value to enrich_exploration; false: fixed by the author). ``mode`` "auto" runs by itself when a person loads a query; "manual" only when asked. enrich_exploration with how="run" runs either. ``authorized_tables`` are the tables those queries may read. In a query's ``sql``, ``graph_edges`` and ``graph_nodes`` are the graph being enriched and exist only inside an enrichment: a query of your own (save_query, run_query) reads the authorized tables without them.
+The enrichments of a context (``context_id`` of an exploration or a case's graph item): extra data its author attached, to add as properties of the nodes or edges on a graph. Each has ``name`` (what the other tools take), ``label``, ``description`` (what it adds and when to use it, when the author wrote one) and one or both of: ``lookup``: a table read by a node key (``match_node_types``, ``columns``); enrich_exploration saves its columns on an exploration, lookup_enrichment reads its rows for one entity of a case. ``run``: a SQL ``query`` (its ``sql`` is given) or a ``provider`` (code the deployment registered; ``registered`` false means it cannot run here) computed over the graph, writing ``target`` nodes or edges. A provider also gives ``columns`` (the properties it writes, when declared) and ``params``: each parameter's type, bounds, ``choices``, the ``value`` this context sets, and ``overridable`` (true: you may pass another value to enrich_exploration; false: fixed by the author). ``mode`` "auto" runs by itself when a person loads a query; "manual" only when asked. enrich_exploration with how="run" runs either. ``authorized_tables`` are the tables those queries may read. In a query's ``sql``, ``graph_edges`` and ``graph_nodes`` are the graph being enriched and exist only inside an enrichment: a query of your own (query_context, or save_query + run_query in a case) reads the authorized tables without them. describe_context gives the same entries with the rest of the context (its graph tables, types and properties); query_source asks one without writing anything.
 
 Human twin: `GET /api/graph-contexts/{context_id}`
 
@@ -421,6 +422,57 @@ Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`, `P
 | `expected_revision` | integer |  | null |
 | `how` | string |  | null |
 | `params` | object |  | null |
+
+## Contexts and sources
+
+### list_contexts
+
+The graph contexts you can read: each a graph over some tables, with its ``description`` (what the data is), node and relationship types and the names of its declared ``sources``. ``q`` searches titles, descriptions and tags. Start here, then describe_context. A case-scoped token sees only the contexts its cases use.
+
+Human twin: `GET /api/graph-contexts`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `q` | string |  | null |
+
+### describe_context
+
+Everything a context offers, to plan a query before running one. ``context``: title, the author's ``description`` (read it: it is where types, relationship directions and caveats are explained) and ``query_languages``. ``graph``: the node and edge tables, which columns hold the id, the type and an edge's two ends, the node and relationship types, and the properties with their types and descriptions. ``tables``: every table query_context may read (``sql_queryable``). ``sources``: lookups, enrichment queries and providers the author declared, each with its description, parameters, the columns it returns when declared, and under ``ask`` how query_source takes it. A source or column with no description is still usable: query it to see. Pass ``tables`` (up to 10 names from the list) to add the warehouse's own metadata for them: column names, types and comments.
+
+Human twin: `GET /api/graph-contexts/{context_id}/catalog`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `context_id` | uuid | yes |  |
+| `tables` | list of string |  | null |
+
+### query_context
+
+Run one read-only query over a context's tables and get its rows (columns, rows, row_count, truncated); nothing is saved. ``language`` "sql" (one SELECT; only the tables describe_context lists as sql_queryable) or "cypher" (any projection: ``MATCH (n:Person) RETURN n.name, count(*)``), as the context's ``query_languages`` allow. Aggregate and filter in the query: ``row_limit`` defaults to 200 and is capped at 5000. To keep a result in a case, use save_query and run_query instead.
+
+Human twin: `POST /api/graph-contexts/{context_id}/query/table`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `context_id` | uuid | yes |  |
+| `query` | string | yes |  |
+| `language` | string |  | `"sql"` |
+| `row_limit` | integer |  | `200` |
+
+### query_source
+
+Ask one declared source of a context (a ``name`` under ``sources`` in describe_context) about some ids, and get its values back; nothing is written to any graph. Its ``ask`` says what to pass. how="lookup": ``ids`` are key values; returns ``rows`` {id: [row]}. how="run" (an enrichment query or provider): ``ids`` are node ids; returns ``rows`` {id: {column: value}} for the ids it knows. Use ``items`` instead of ``ids`` when it needs more than the id: [{node_id, node_type, properties}], or for a source that enriches edges [{edge_id, src, dst, relationship_type}]. ``how`` defaults to the first the source offers. ``params`` sets a provider's parameters marked ``overridable``; the result's ``params`` are the values used. ``truncated`` means not every id was reached; ``partial`` with ``error`` that a later batch failed.
+
+Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`, `POST /api/graph-contexts/{context_id}/enrichment/{name}/run`
+
+| Parameter | Type | Required | Default |
+|---|---|---|---|
+| `context_id` | uuid | yes |  |
+| `name` | string | yes |  |
+| `ids` | list of string |  | null |
+| `items` | list of object |  | null |
+| `params` | object |  | null |
+| `how` | string |  | null |
 
 ## Queries and tables
 

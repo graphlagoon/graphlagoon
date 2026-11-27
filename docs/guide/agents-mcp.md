@@ -134,7 +134,10 @@ walks the agent through it:
    Through the Databricks Apps proxy the token goes in `X-Graphlagoon-Agent-Token`
    next to your Databricks OAuth token ([REST API](./rest-api.md#authentication)).
    `save_query` + `run_query` run SQL or Cypher against a context the person
-   reads; `add_table` keeps a result the agent computed.
+   reads and keep the result in the case; `add_table` keeps a result the agent
+   computed. To look before saving anything, `describe_context` and
+   `query_context` read a context directly
+   ([A context as a data catalog](#a-context-as-a-data-catalog)).
 4. **Analyse.** `get_graph`, `search_entities`, `get_entity`,
    `run_analysis(kind=trace | paths | er | links | communities)`, and
    `find_entity_cases(uid)` — where the entity appeared in the person's other
@@ -157,8 +160,11 @@ walks the agent through it:
    `changes_since` tell the agent what is its own and what moved.
 
 A case-scoped token does all of the above inside its cases only:
-`find_entity_cases` and `list_tasks` never show other cases, and
-`create_case` answers `CASE_SCOPED_TOKEN`. Over REST it reaches its cases,
+`find_entity_cases` and `list_tasks` never show other cases,
+`create_case` answers `CASE_SCOPED_TOKEN`, and the context tools
+(`list_contexts`, `describe_context`, `query_context`, `query_source`,
+`list_enrichments`) reach only the contexts its cases use (`OUT_OF_SCOPE`
+otherwise). Over REST it reaches its cases,
 `/api/org/…` and `/api/config`; explorations and context queries outside a
 case answer 403.
 
@@ -222,7 +228,9 @@ attached: a table looked up by a node key, a SQL query over the graph, or a prov
 A **manual** enrichment never runs for anyone until a person or an agent asks, which suits a slow or costly
 one: its description is where the author says so. An agent that only wants to write its own SQL reads the
 queries and `authorized_tables` from `list_enrichments` as a starting point; `graph_edges` and `graph_nodes`
-exist only inside an enrichment, so a query saved with `save_query` reads the tables directly. An agent
+exist only inside an enrichment, so a query of its own (`query_context`, or `save_query` in a case) reads the
+tables directly. To read a source's values without saving them anywhere, see
+[A context as a data catalog](#a-context-as-a-data-catalog). An agent
 cannot add or change a context's enrichments: that stays with people who hold **Create graph contexts**.
 
 The **look** is the agent's too: `create_exploration(look=…)` and
@@ -250,6 +258,36 @@ stay, and every link and case that references it shows the new graph.
 
 A **case-scoped token** reaches only the explorations its cases reference, and
 creates one only to attach it to one of its cases (`investigation_id`).
+
+## A context as a data catalog
+
+An agent does not need a case, an exploration or an id from you to read data. A
+[graph context](./getting-started.md) is a graph over some tables, plus whatever its author attached to it.
+Four tools read it, and only read:
+
+| Step | Tool | What comes back |
+|---|---|---|
+| Find | `list_contexts(q?)` | The contexts you can read: title, description, node and relationship types, names of the declared sources. |
+| Understand | `describe_context(context_id)` | The author's **description**; the node and edge tables and which columns hold the id, the type and an edge's two ends; node and relationship types; properties with their types and descriptions; every table a query may read; and the **sources** (lookups, enrichment queries, providers) with their description, parameters and how to ask each one. |
+| | `describe_context(context_id, tables=[…])` | The same, plus the warehouse's own metadata for up to 10 of those tables: column names, types and comments (the Unity Catalog column comments on Databricks). |
+| Query | `query_context(context_id, query, language)` | Rows of one read-only SQL `SELECT` or Cypher query over the context's tables, with the same rules as the Query Console: no table outside the context, nothing but reads. 200 rows by default, 5,000 at most, so aggregate in the query. |
+| Ask a source | `query_source(context_id, name, ids)` | What one declared source knows about some ids: a lookup's rows per key, or the values an enrichment query or provider would write, per node id. Nothing is written to any graph. |
+
+**What makes a context legible to an agent** is what its author wrote, and none of it is required: the
+context's description (the place to say what each node type is, what each relationship means *and in which
+direction*, and what to be careful with), the description of each property and of each source, and the column
+comments in the warehouse. A source or a column with no description is listed and usable all the same; the
+agent queries it to see. Nothing is hidden for lack of metadata.
+
+**Isolation.** A source is reachable only through a context that declares it, by the name that context gave
+it, by someone who can read that context. Declaring one takes **Create graph contexts**. A provider's
+parameters fixed by the author stay fixed; an agent sets only the ones marked `overridable`. These tools
+add no reach: each is a call a reader of the context can already make from the page (the console query, an
+enrichment's **Run**, a lookup). A provider still owes any authorization narrower than the context
+([Python API](./python-api.md#enrichment-providers)): "declared and readable" is not row-level security.
+
+To keep a result in a case, use `save_query` + `run_query` (a versioned item) or `enrich_exploration` (saved
+on the exploration) instead.
 
 ## What the agent does directly, what arrives suggested, what it never does
 
@@ -310,7 +348,7 @@ twin, or a case route with neither a tool nor a reason, fails the build).
 
 The **[MCP tool reference](./agents-mcp-tools.md)** lists every tool with its
 description, its parameters and the route it mirrors, by group: cases, brief
-and material, adding material, explorations, queries and tables, annotations and evidence,
+and material, adding material, explorations, contexts and sources, queries and tables, annotations and evidence,
 tasks, graph and entities, analyses, reports and decisions, journal,
 organization. It is generated from the server (`make docs-api`), so it is
 exactly what an agent sees in `tools/list`.
@@ -352,6 +390,9 @@ identity ring) are the org's own docs, written in the admin area.
 - In a case no tool deletes: an agent adds items, versions and annotations but
   never removes them (it can empty a group it created). Inside an exploration
   it does delete nodes and edges, for good (see [Explorations](#explorations)).
+- `query_context` returns at most 5,000 rows and `describe_context` describes at most 10 tables per call;
+  the warehouse is asked each time (no cache).
+- `query_source` on a source that enriches edges needs each edge's `src` and `dst`, not just its id.
 - `search_case` is a case-insensitive substring search over titles and the
   latest text of each item; there is no full-text ranking.
 - `communities` is label propagation on the unified graph, not the browser's

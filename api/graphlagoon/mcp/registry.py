@@ -19,6 +19,7 @@ _ITEM = f"{_CASE}/items/{{item_id}}"
 _ANNOTATION = f"{_CASE}/annotations/{{annotation_id}}"
 _ENRICHMENT = "/api/graph-contexts/{context_id}/enrichment/{name}/lookup"
 _ENRICHMENT_RUN = "/api/graph-contexts/{context_id}/enrichment/{name}/run"
+_CONTEXT_CATALOG = "/api/graph-contexts/{context_id}/catalog"
 _EXPLORATION = "/api/explorations/{exploration_id}"
 _MENU_TABLE = "/api/graph-contexts/{context_id}/menu-actions/{action_id}/table"
 _CONTEXT_EXPLORATIONS = "/api/graph-contexts/{context_id}/explorations"
@@ -51,6 +52,11 @@ TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
     "query_into_exploration": [("POST", "/api/graph-contexts/{context_id}/cypher"), ("PUT", _EXPLORATION)],
     "enrich_exploration": [("POST", _ENRICHMENT), ("POST", _ENRICHMENT_RUN), ("PUT", _EXPLORATION)],
     "list_enrichments": [("GET", "/api/graph-contexts/{context_id}")],
+    # A context read as a data catalog, with no case and no graph: all four only read.
+    "list_contexts": [("GET", "/api/graph-contexts")],
+    "describe_context": [("GET", _CONTEXT_CATALOG)],
+    "query_context": [("POST", "/api/graph-contexts/{context_id}/query/table")],
+    "query_source": [("POST", _ENRICHMENT), ("POST", _ENRICHMENT_RUN)],
     "run_query": [("POST", f"{_ITEM}/run")],
     "join_tables": [("POST", f"{_CASE}/items/join")],
     "compare_tables": [("POST", f"{_CASE}/items/compare")],

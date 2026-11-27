@@ -1069,6 +1069,10 @@
    "summary": "A new exploration in a readable context, saved with its graph: ``graph_query`` (Cypher, or SQL on a SQL context) runs now and its answer is the graph; ``nodes`` [{id, type, properties}] and ``edges`` [{id?, source, target, type, properties}] are added on top (or are the whole graph without a query)."
   },
   {
+   "name": "describe_context",
+   "summary": "Everything a context offers, to plan a query before running one."
+  },
+  {
    "name": "edit_exploration",
    "summary": "Change an exploration's graph in place, in one atomic batch, in this order: ``replace`` (drop every node and edge, the person's layer too: a brand-new graph under the same id) \u2192 ``remove_node_ids`` (deleted, with their edges; for good, from the saved graph and the layer) \u2192 ``remove_edge_ids`` \u2192 ``add_nodes`` [{id, type, properties}] (an id already there gets the type and properties given) \u2192 ``add_edges`` [{id?, source, target, type, properties}] (both ends must exist after the batch) \u2192 ``set_properties`` [{id, kind: node|edge, properties, unset: [keys]}]."
   },
@@ -1133,6 +1137,10 @@
    "summary": "A page of the cases you can read: ``items`` (id, title, status, case_type, fields, deadline, item and suggestion counts), ``total`` and ``counts``."
   },
   {
+   "name": "list_contexts",
+   "summary": "The graph contexts you can read: each a graph over some tables, with its ``description`` (what the data is), node and relationship types and the names of its declared ``sources``."
+  },
+  {
    "name": "list_enrichments",
    "summary": "The enrichments of a context (``context_id`` of an exploration or a case's graph item): extra data its author attached, to add as properties of the nodes or edges on a graph."
   },
@@ -1173,8 +1181,16 @@
    "summary": "Propose the decision; a person records it (you never decide)."
   },
   {
+   "name": "query_context",
+   "summary": "Run one read-only query over a context's tables and get its rows (columns, rows, row_count, truncated); nothing is saved."
+  },
+  {
    "name": "query_into_exploration",
    "summary": "Run a graph query against the exploration's context (Cypher; SQL on a SQL context) and ``mode`` \"add\" its answer to the graph (what is there stays) or \"replace\" the graph with it (the query becomes the exploration's ``graph_query``)."
+  },
+  {
+   "name": "query_source",
+   "summary": "Ask one declared source of a context (a ``name`` under ``sources`` in describe_context) about some ids, and get its values back; nothing is written to any graph."
   },
   {
    "name": "read_item",
