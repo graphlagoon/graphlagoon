@@ -14560,3 +14560,18 @@ Also: the `query.freeform` notes in `admin_registry.py` (a permission the code n
 **Tests:** `test_mcp_contexts.py` (table outside the allowed sources), `test_enrichment_providers.py` (empty value), `ContextMenuActionsModal.tableProvider.test.ts` (old action kept in its shape), `test_table_providers.py` (404). Backend 1774 passed with the 16 known environmental failures; vitest 3261; `vue-tsc` clean.
 **Public docs:** `agents-mcp.md`, `agents-mcp-tools.md` regenerated. **Admin-area impact:** none (comments only).
 **Not changed:** a table source's run is still audited only for agents, like a template table: auditing every human read is a product decision, not a fix.
+
+## [2026-11-27 21:30] - Dev tooling: `skill_agentic_review`, a review of the product as used by an agent
+
+**Feature:** `/skill_agentic_review [quick|standard|deep] [focus]` guides a session through reviewing the MCP server, the REST API as an agent scripts it, and the decisions behind them. It reports ranked findings and decision records; it changes no product code.
+**Decisions:**
+1. **Trials before opinions.** Fresh agents do real jobs against the local MCP server knowing only what `tools/list` and the results tell them, through `mcp_probe.py` (mint a dev token, `surface`, `tools`, `call` with a per-trial log, `report`). Reviewers read those logs. A finding with no observation behind it is marked `unobserved` and ranks below any observed one.
+2. **Several agents for independence, not for a vote.** Agents on one model have correlated errors, and debate converges on the most fluent argument. Each agent gets a different job (trial), lens pair, or the task of refuting one finding, blind to the others. Scoring by a panel is kept for trade-offs no trial can settle, with criteria and weights fixed first, one stance per judge, one round, and a split reported as a missing fact instead of resolved by majority.
+3. **Six lenses from UX theory, read for a model as the user:** gulf of execution (discoverability, information scent), gulf of evaluation (feedback, recovery), context economy (cognitive load as context budget), task fit (jobs, not endpoints; the tool-twin rule of `mcp/registry.py` is named as a trade-off, not a defect), authority and oversight (levels of automation, review cost of suggestions, untrusted data), person–agent shared workspace.
+4. **A finding closes when something enforces it:** a registry or docs test, an MCP test, or the job kept as a trial to rerun. Prose advice is the last resort.
+5. **Local only.** The probe refuses a non-local URL: trials write cases as the token's owner.
+**Rejected:** a slash command file under `.claude/commands` (the repo keeps its prompts as skills with reference files); a standing `agent-reviewer` subagent (three briefings in `reference/panel.md` cover it without another definition to maintain); a fixed job list (jobs are picked from the seed in use, by shape).
+**Files:** new `.claude/skills/skill_agentic_review/{SKILL.md,mcp_probe.py,reference/lenses.md,reference/panel.md}`.
+**Tests:** none automated. Run against the dev stack: `surface` (54 tools, `tools/list` ≈ 64k chars), `call` with a good, an invalid and an unknown tool, `report`, the refusal of a remote URL, and one blind trial with the briefing as written (orient job on Demo · QSA: done in 6 tool calls, answer 380 checked against the seed).
+**Public docs:** No public docs impact. **Admin-area impact:** No admin-area impact.
+**Known limitations:** a trial agent is told not to read the repo, not prevented; `report` counts characters, tokens are an estimate (÷4); the first full run will create `docs/dev/agentic-review.md`.
