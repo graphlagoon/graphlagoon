@@ -559,7 +559,7 @@ const SCENES: Scene[] = [
     },
   },
   {
-    // An agent's HTML report opened large (⤢ Expand): the item viewer over the case.
+    // An agent's HTML report in the reader: where the canvas is, the material and the inspector at hand.
     guide: 'investigations',
     scene: 'item-viewer',
     path: '/investigations/case-vendor?view=rep-vendor',

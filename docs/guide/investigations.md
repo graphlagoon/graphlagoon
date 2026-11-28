@@ -154,31 +154,39 @@ Everything in a case is an **item** of the material list (left column). Graph
 items carry an **on canvas** checkbox: unchecking one removes its nodes
 without resetting the layout.
 
-**Viewing and downloading.** Selecting an item shows its card in the
-inspector, with **Preview**, **⤢ Expand** and **Download** for its latest
-version. Tables open as a table with the first 200 rows — or as a **chart**
+**Reading the material.** Picking an item of the material opens it in the
+**reader**, which takes the canvas's place: the material list stays on the
+left to move to another item, the inspector on the right keeps the item's
+details, and **Esc** or **✕** goes back to the graph (picking a graph item
+does too). Tables open as a table with up to 2,000 rows — or as a **chart**
 (line or bars, an x column and numeric series), which you can save as the
 item's view; markdown renders (headings, lists, tables, links; **Raw** shows
 the source, and no HTML of the document ever runs); text and JSON open as
 text; images and PDFs display inline; HTML and SVG render in a sandboxed frame
 (see below); a link document opens its address. Every read is audited
-(`investigation.item_read`).
+(`investigation.item_read`), so opening an item counts as reading it.
 
-**Expand** (or a double click on the item in the material list, or *Expand*
-on one of its versions) opens it in a viewer that takes the whole window — the
-place for an agent's HTML report or slides, a large image, a PDF or a long
-table:
+**Reviewing what an agent uploaded.** The reader is where you judge it: a
+suggested item shows **✓ Confirm** and **✕ Reject** in the reader's header and,
+once judged, the reader moves to the next suggestion; **Next to review (N)**
+jumps there from any other item, and **Pin as evidence** freezes the version
+you are reading. In the material list a dot marks what someone else (an agent,
+mostly) added since your last visit until you open it, each group counts its
+new items, and one glyph per row tells a page, a PDF, an image, a table and a
+note apart. A case with no graph opens on *N items to read, M waiting for your
+review* with **Start reviewing**, and the graph's toolbars stay out of the way
+until the case has a graph.
 
-| In the viewer | |
+| In the reader | |
 |---|---|
 | ◀ ▶ or ← → | the previous or next item, in the material list's order (graphs open on the canvas instead) |
 | version selector | any version of the item |
 | ⤢ | the browser's full screen |
-| Esc, ✕ or the browser's **Back** | close |
+| Esc, ✕ or the browser's **Back** | back to the graph |
 | tables | up to 2,000 rows, a row filter, Table/Chart |
 | images | Fit, 100 %, + / −, wheel to zoom, drag to move |
 
-![An agent's HTML report opened in the item viewer](/screenshots/investigations-item-viewer.png)
+![An agent's HTML report opened in the reader, where the canvas is](/screenshots/investigations-item-viewer.png)
 
 The viewer is in the address (`…/investigations/<id>?view=<item>&v=<version>`),
 so a link opens the case with that item already large. Files over 100 MB are

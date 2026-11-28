@@ -24,8 +24,8 @@ beforeEach(() => {
 describe('ItemPreview · a table as a chart (06 P5)', () => {
   it('switches to a chart of the numeric columns and saves it as the item view', async () => {
     const { getByTestId, queryByTestId } = render(ItemPreview, { props: { item: ITEM as any, investigationId: 'inv-1' } })
-    await fireEvent.click(getByTestId('item-preview-open'))
-    await flushPromises()
+    await flushPromises() // the content shows as soon as the item is picked: no Preview click
+    expect(getByTestId('item-preview').dataset.kind).toBe('table')
     expect(queryByTestId('table-chart')).toBeNull() // a table by default
     await fireEvent.click(getByTestId('item-view-chart'))
     expect(getByTestId('table-chart').dataset.type).toBe('line')
@@ -41,7 +41,6 @@ describe('ItemPreview · a table as a chart (06 P5)', () => {
     useInvestigationStore().current = { id: 'inv-1', status: 'closed', has_write_access: true } as any
     const item = { ...ITEM, state: { chart: { type: 'bar', x: 'day', series: ['cb'] } } }
     const { getByTestId, queryByTestId } = render(ItemPreview, { props: { item: item as any, investigationId: 'inv-1' } })
-    await fireEvent.click(getByTestId('item-preview-open'))
     await flushPromises()
     expect(getByTestId('table-chart').dataset.type).toBe('bar')
     expect(queryByTestId('chart-series-tpv')).toBeNull()
@@ -50,7 +49,7 @@ describe('ItemPreview · a table as a chart (06 P5)', () => {
 })
 
 describe('ItemPreview · Expand', () => {
-  it('opens the full-screen viewer on the latest, or on the older version it shows, without reading the bytes here', async () => {
+  it('opens the reader on the latest, or on the older version it shows', async () => {
     const { getByTestId, unmount } = render(ItemPreview, { props: { item: { ...ITEM, current_version: 3 } as any, investigationId: 'inv-1' } })
     await fireEvent.click(getByTestId('item-expand'))
     expect(useItemViewerStore().target).toEqual({ itemId: 't1', version: null })
@@ -58,13 +57,28 @@ describe('ItemPreview · Expand', () => {
     const older = render(ItemPreview, { props: { item: { ...ITEM, current_version: 3 } as any, investigationId: 'inv-1', version: { version: 2 } as any } })
     await fireEvent.click(older.getByTestId('item-expand'))
     expect(useItemViewerStore().target).toEqual({ itemId: 't1', version: 2 })
-    expect(api.getInvestigationItemContent).not.toHaveBeenCalled()
   })
 
-  it('a file too large for the inspector can still be expanded or downloaded', () => {
+  it('leaves the read to the reader while it shows this item, and shows the content once it closes', async () => {
+    const viewer = useItemViewerStore()
+    viewer.open('t1')
+    const { queryByTestId, getByTestId } = render(ItemPreview, { props: { item: ITEM as any, investigationId: 'inv-1' } })
+    await flushPromises()
+    expect(api.getInvestigationItemContent).not.toHaveBeenCalled()
+    expect(queryByTestId('item-preview')).toBeNull()
+    expect(queryByTestId('item-expand')).toBeNull() // it is already there
+    viewer.close()
+    await flushPromises()
+    expect(getByTestId('item-preview').dataset.kind).toBe('table')
+    expect(api.getInvestigationItemContent).toHaveBeenCalledTimes(1)
+  })
+
+  it('a file too large for the inspector is not fetched, and can still be opened large or downloaded', async () => {
     const big = { ...ITEM, latest: { ...ITEM.latest, size_bytes: 50 * 1024 * 1024 } }
     const { queryByTestId, getByTestId } = render(ItemPreview, { props: { item: big as any, investigationId: 'inv-1' } })
-    expect(queryByTestId('item-preview-open')).toBeNull()
+    await flushPromises()
+    expect(api.getInvestigationItemContent).not.toHaveBeenCalled()
+    expect(queryByTestId('item-preview')).toBeNull()
     expect(getByTestId('item-expand')).toBeTruthy()
     expect(getByTestId('item-download')).toBeTruthy()
   })

@@ -111,13 +111,12 @@ describe('SelectionInspector (05 §3, three states)', () => {
     expect(emitted('activate')).toBeTruthy()
   })
 
-  it('item: previews a CSV version as a table and downloads it under its file name', async () => {
+  it('item: shows a CSV version as a table and downloads it under its file name', async () => {
     const csv = { ...ITEM, id: 'it-csv', subkind: 'csv', title: 'Extrato SIMBA', status: 'confirmed', provenance: { filename: 'CASO17_EXTRATO.TXT' }, latest: { version: 1, sha256: 'd'.repeat(64), content_type: 'text/csv', size_bytes: 40 } }
     api.getInvestigationItemContent.mockResolvedValue(new TextEncoder().encode('CONTA\tVALOR\n109738-0\t3431900\n').buffer)
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const { getByTestId } = mount({ activeItem: csv })
-    await fireEvent.click(getByTestId('item-preview-open'))
-    await flushPromises()
+    await flushPromises() // shown on selection
     const preview = getByTestId('item-preview')
     expect(preview.dataset.kind).toBe('table')
     expect(preview.textContent).toContain('VALOR')

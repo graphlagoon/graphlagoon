@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { beginVisit } from '@/utils/caseVisit';
 /**
  * Bottom strip of the case (05 §3): Dated edges (swimlanes over every dated
  * edge; the brush becomes the time-window chip), Journal (newest first, older pages on
@@ -89,18 +90,11 @@ function openEvent(e: InvestigationEvent) {
 }
 
 // "Since my last visit": the previous visit's time, kept per case in localStorage.
-const VISIT_KEY = (id: string) => `gl:case:${id}:lastVisit`;
 const lastVisit = ref<string | null>(null);
 const sinceVisit = ref(false);
 onMounted(() => {
   const id = store.current?.id;
-  if (!id) return;
-  try {
-    lastVisit.value = localStorage.getItem(VISIT_KEY(id));
-    localStorage.setItem(VISIT_KEY(id), new Date().toISOString());
-  } catch {
-    lastVisit.value = null;
-  }
+  if (id) lastVisit.value = beginVisit(id);
 });
 const isNew = (e: InvestigationEvent) => lastVisit.value !== null && e.at > lastVisit.value;
 const newCount = computed(() => shown.value.filter(isNew).length);

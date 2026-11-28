@@ -7,10 +7,12 @@
  * "Upload" the file assistant; "Note" a markdown editor for a new document/note.
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { AlertTriangle, Bot, ExternalLink, FileText, GitBranch, Lock, Pin, Plus, StickyNote, Table2, Terminal, Upload, User } from 'lucide-vue-next';
+import { AlertTriangle, Bot, ExternalLink, FileText, FileType, GitBranch, Globe, Image as ImageIcon, Link as LinkIcon, Lock, Pin, Plus, StickyNote, Table2, Terminal, Upload, User } from 'lucide-vue-next';
 import QueryItemCard from './QueryItemCard.vue';
 import TableOpsDialog, { type TableOp } from './TableOpsDialog.vue';
 import { useInvestigationStore, isGraphItem } from '@/stores/investigation';
+import { itemGlyph, opensInReader } from '@/utils/itemPreview';
+import { isNewItem, markOpened } from '@/utils/caseVisit';
 import { useItemViewerStore } from '@/stores/itemViewer';
 import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
@@ -44,6 +46,19 @@ const emit = defineEmits<{ add: []; upload: []; select: [item: CaseItem]; collap
 
 const store = useInvestigationStore();
 const viewer = useItemViewerStore();
+/**
+ * Picking an item shows it: a graph on the canvas, anything else in the reader that takes
+ * the canvas's place (the list and the inspector stay at hand to judge it and move on).
+ */
+function pick(item: CaseItem) {
+  markOpened(item.id);
+  emit('select', item);
+  if (opensInReader(item)) viewer.open(item.id);
+  else viewer.close();
+}
+const GLYPHS = { table: Table2, query: Terminal, note: StickyNote, image: ImageIcon, pdf: FileType, page: Globe, link: LinkIcon, text: FileText };
+const GLYPH_LABELS = { table: 'Table', query: 'Query', note: 'Note', image: 'Image', pdf: 'PDF', page: 'Page (HTML)', link: 'Link', text: 'Document' };
+const isNew = (item: CaseItem) => isNewItem(item, store.current?.id, auth.email);
 const auth = useAuthStore();
 const { can } = usePermissions();
 const toast = useToast();
@@ -153,7 +168,7 @@ const visible = computed(() => {
   );
 });
 const groups = computed(() =>
-  GROUPS.map((g) => ({ ...g, items: visible.value.filter((i) => i.kind === g.kind) })).filter((g) => g.items.length || !search.value),
+  GROUPS.map((g) => ({ ...g, items: visible.value.filter((i) => i.kind === g.kind) })).filter((g) => g.items.length),
 );
 const showRemoved = ref(false);
 /** `G3`, `Q2`, `D1`: stable short ids (05 §3: never a raw UUID; see `caseShortIds`). */
@@ -321,6 +336,7 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
         <span>{{ collapsed.has(g.kind) ? '▸' : '▾' }}</span>
         <component :is="g.icon" :size="13" />
         {{ g.label }} <span class="muted">{{ g.items.length }}</span>
+        <span v-if="g.items.some(isNew)" class="new-count" :data-testid="`items-new-${g.kind}`">{{ g.items.filter(isNew).length }} new</span>
       </button>
       <template v-if="!collapsed.has(g.kind)">
         <div v-if="g.kind === 'table' && selectedTables.size && canEdit" class="ops-bar" data-testid="table-ops-bar">
@@ -341,11 +357,11 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
           tabindex="0"
           :aria-label="`${item.title} (${shortIds.get(item.id) ?? item.kind})`"
           :aria-current="activeItem === item.id ? 'true' : undefined"
-          :title="item.kind === 'graph' ? undefined : 'Double-click to open it large'"
-          @click="emit('select', item)"
+          :title="item.title"
+          @click="pick(item)"
           @dblclick="item.kind !== 'graph' && item.current_version > 0 && viewer.open(item.id)"
-          @keydown.enter.self.prevent="emit('select', item)"
-          @keydown.space.self.prevent="emit('select', item)"
+          @keydown.enter.self.prevent="pick(item)"
+          @keydown.space.self.prevent="pick(item)"
         >
           <input
             v-if="isGraphItem(item) && item.accessible"
@@ -358,9 +374,10 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
             @change="store.toggleCanvas(item.id, ($event.target as HTMLInputElement).checked)"
           />
           <Lock v-else-if="isGraphItem(item)" :size="12" class="muted" title="Restricted: you cannot read this item's context" />
-          <span v-else class="dot" :style="{ background: store.sourceColors[item.id] ?? 'transparent' }"></span>
+          <component :is="GLYPHS[itemGlyph(item)]" v-else :size="13" class="glyph" :title="GLYPH_LABELS[itemGlyph(item)]" :data-testid="`item-glyph-${item.id}`" :data-glyph="itemGlyph(item)" />
           <span v-if="isGraphItem(item)" class="ring" :style="{ borderColor: store.sourceColors[item.id] }"></span>
           <span class="title" :title="item.title">{{ item.title }}</span>
+          <span v-if="isNew(item)" class="new-dot" title="New since your last visit" aria-label="New since your last visit" :data-testid="`item-new-${item.id}`"></span>
           <span class="short muted">{{ shortIds.get(item.id) }}</span>
           <!-- Only an agent's work is marked: "you" on every row said nothing and took the title's room. -->
           <span v-if="item.author_kind === 'agent' || item.author_email !== auth.email" class="chip" :class="item.author_kind" :title="item.author_email" :data-testid="`item-author-${item.id}`">
@@ -652,10 +669,27 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
   font-size: 11px;
 }
 
-.dot {
-  width: 8px;
-  height: 8px;
+.glyph {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.new-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
+  background: var(--color-primary);
+}
+
+.new-count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--color-primary-subtle);
+  color: var(--color-primary);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .ring {

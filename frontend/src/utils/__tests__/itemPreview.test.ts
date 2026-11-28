@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildPreview, itemFileName, viewerItems, PREVIEW_MAX_ROWS, PREVIEW_MAX_ROWS_FULL } from '@/utils/itemPreview'
+import { buildPreview, itemFileName, itemGlyph, opensInReader, viewerItems, PREVIEW_MAX_ROWS, PREVIEW_MAX_ROWS_FULL } from '@/utils/itemPreview'
 
 const bytes = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer
 
@@ -68,5 +68,25 @@ describe('viewerItems', () => {
       it('t1', 'table'), it('t0', 'table', { current_version: 0 }), it('q1', 'query'), it('d2', 'document', { deleted_at: '2026-10-01' }),
     ]
     expect(viewerItems(items).map((i) => i.id)).toEqual(['q1', 't1', 'd1', 'n1'])
+  })
+})
+
+describe('opensInReader · itemGlyph', () => {
+  it('anything with a version that is not a graph is read in the reader', () => {
+    expect(opensInReader({ kind: 'note', current_version: 1 } as any)).toBe(true)
+    expect(opensInReader({ kind: 'table', current_version: 3 } as any)).toBe(true)
+    expect(opensInReader({ kind: 'query', current_version: 0 } as any)).toBe(false) // never run
+    expect(opensInReader({ kind: 'graph', current_version: 1 } as any)).toBe(false)
+  })
+
+  it('a PDF, a page, an image and a link tell apart in the list', () => {
+    const doc = (content_type: string, subkind = 'upload') => itemGlyph({ kind: 'document', subkind, latest: { content_type } } as any)
+    expect(doc('application/pdf')).toBe('pdf')
+    expect(doc('text/html; charset=utf-8')).toBe('page')
+    expect(doc('image/png')).toBe('image')
+    expect(doc('text/markdown', 'markdown')).toBe('text')
+    expect(doc('text/plain', 'link')).toBe('link')
+    expect(itemGlyph({ kind: 'table', subkind: 'csv', latest: null } as any)).toBe('table')
+    expect(itemGlyph({ kind: 'note', subkind: 'free', latest: null } as any)).toBe('note')
   })
 })

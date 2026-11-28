@@ -423,6 +423,48 @@ test.describe('Investigations', () => {
     await expect(page.getByTestId('journal')).toContainText('confirmed the suggested item “Rastro do dinheiro”');
   });
 
+  test("a case of documents an agent uploaded: start reviewing, read each where the canvas is, confirm and move on", async ({ authenticatedPage: page }) => {
+    const ver = (id: string, content_type: string) => ({ id: `v-${id}`, item_id: id, version: 1, sha256: 'c'.repeat(64), size_bytes: 200, content_type, has_text: true, created_by: 'agent@test.com', author_kind: 'agent', created_at: now });
+    const up = (id: string, title: string, contentType: string, extra: Record<string, unknown>) =>
+      item(id, 'ctx', title, { kind: 'document', subkind: 'upload', exploration_id: null, context_id: null, author_kind: 'agent', author_email: 'agent@test.com', current_version: 1, latest: ver(id, contentType), ...extra });
+    const table = up('tab', 'Top counterparties', 'application/json', { kind: 'table', subkind: 'result', status: 'suggested', _text: JSON.stringify({ columns: ['account', 'total'], rows: [['acc-1', 900], ['acc-2', 400]] }) });
+    const report = up('rep', 'Vendor review', 'text/html', { status: 'suggested', _text: '<html><body><h1>Vendor review</h1></body></html>' });
+    const note = up('note', 'Same phone', 'text/markdown', { kind: 'note', subkind: 'free', _text: 'Ana and Bia share one phone.' });
+    await page.addInitScript(() => localStorage.setItem('gl:case:inv-1:lastVisit', '2026-01-01T00:00:00.000Z'));
+    await seedInvestigations(page, [{ ...CASE, deadline: null }], { 'inv-1': [table, report, note] });
+    await page.goto('/investigations/inv-1');
+
+    // No graph: the centre says what there is to read, and the graph's bars are not in the way.
+    await expect(page.getByTestId('canvas-empty-material')).toContainText('3 items to read, 2 waiting for your review');
+    await expect(page.getByTestId('workspace-filters-btn')).toHaveCount(0);
+    await expect(page.getByTestId('item-new-rep')).toBeVisible(); // arrived since the last visit
+    await expect(page.getByTestId('item-glyph-rep')).toHaveAttribute('data-glyph', 'page');
+    await expect(page.getByTestId('items-group-query')).toHaveCount(0);
+
+    await page.getByTestId('canvas-empty-read').click();
+    const reader = page.getByTestId('item-viewer');
+    await expect(reader).toHaveAttribute('role', 'region'); // where the canvas is, not a dialog over the page
+    await expect(page.getByTestId('viewer-title')).toHaveText('Top counterparties');
+    await expect(reader.getByTestId('item-preview')).toContainText('acc-1');
+    await expect(page.getByTestId('inspector-item-title')).toHaveText('Top counterparties');
+    await expect(page.getByTestId('item-new-tab')).toHaveCount(0); // read
+
+    // Judged in the reader; it moves to the next suggestion by itself.
+    await page.getByTestId('viewer-confirm').click();
+    await expect(page.getByTestId('viewer-title')).toHaveText('Vendor review');
+    await expect(page.getByTestId('item-tab')).not.toHaveClass(/suggested/);
+    await expect(page.getByTestId('item-html')).toBeVisible();
+
+    // The material stays at hand: one click reads another item; Esc goes back.
+    await page.getByTestId('item-note').click();
+    await expect(page.getByTestId('viewer-title')).toHaveText('Same phone');
+    await expect(reader.getByTestId('item-preview')).toContainText('share one phone');
+    await expect(page.getByTestId('viewer-next-review')).toContainText('(1)');
+    await page.keyboard.press('Escape');
+    await expect(reader).toHaveCount(0);
+    await expect(page.getByTestId('canvas-empty-material')).toContainText('1 waiting for your review');
+  });
+
   test('dossier: pinned evidence, a hypothesis with evidence for it, its status and the journal', async ({
     authenticatedPage: page,
   }) => {
@@ -545,8 +587,7 @@ test.describe('Investigations', () => {
       { slug: 'offboarding-memo', title: 'Offboarding memo', kind: 'template', body: '# Offboarding · {{case.title}}' },
     ]);
     await page.goto('/investigations/inv-1');
-    await page.getByTestId('item-t-day').click();
-    await page.getByTestId('item-preview-open').click();
+    await page.getByTestId('item-t-day').click(); // picking the table shows it: no Preview click
     await page.getByTestId('item-view-chart').click();
     await expect(page.getByTestId('table-chart')).toBeVisible();
     await page.getByTestId('chart-type').selectOption('bar');
@@ -583,8 +624,7 @@ test.describe('Investigations', () => {
     });
 
     await page.goto('/investigations/inv-1');
-    await page.getByTestId('item-rep').click();
-    await page.getByTestId('item-expand').click();
+    await page.getByTestId('item-rep').click(); // one click: a report opens large
     const viewer = page.getByTestId('item-viewer');
     await expect(viewer).toBeVisible();
     await expect(page).toHaveURL(/view=rep/);
@@ -605,6 +645,10 @@ test.describe('Investigations', () => {
     await page.keyboard.press('Escape');
     await expect(viewer).toHaveCount(0);
     await expect(page).not.toHaveURL(/view=/);
+
+    // Closed, the item stays picked: the inspector shows it small, with the way back to the large view.
+    await expect(page.getByTestId('inspector-item-title')).toHaveText('Mapa de fluxos');
+    await expect(page.getByTestId('item-expand')).toBeVisible();
 
     // A double click opens it; the browser's Back closes it, and a link opens it again.
     await page.getByTestId('item-img').dblclick();

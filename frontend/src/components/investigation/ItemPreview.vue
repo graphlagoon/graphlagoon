@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * An item version in the inspector: Preview (ItemPreviewBody, compact),
- * Expand (the full-screen viewer, ItemViewer) and Download, for any item the
- * browser can render or not. A link document opens its URL. `version`
- * previews an older version (default: latest).
+ * An item version in the inspector: its content (ItemPreviewBody, compact),
+ * shown as soon as the item is picked, with Open in the reader (ItemViewer, where the
+ * canvas is) and Download. While the reader shows the item, the content is there. A link document opens its URL. `version` shows an
+ * older version (default: latest).
  */
-import { computed } from 'vue';
+import { computed, onMounted, watch } from 'vue';
 import { useItemContent } from '@/composables/useItemContent';
 import { useItemViewerStore } from '@/stores/itemViewer';
 import { PREVIEW_MAX_BYTES } from '@/utils/itemPreview';
@@ -26,8 +26,20 @@ const linkUrl = computed(() => {
   return /^https?:\/\//i.test(url) ? url : null;
 });
 
+/** The version this card is about, as the reader names it (null: the latest). */
+const wanted = computed(() => (props.version && props.version.version !== props.item.current_version ? props.version.version : null));
+/** The reader is already showing it: one read, not two. */
+const inViewer = computed(() => viewer.target?.itemId === props.item.id && (viewer.target.version ?? null) === wanted.value);
+/** A graph is read on the canvas; its stored data (JSON) is shown only when asked for. */
+const onRequest = computed(() => props.item.kind === 'graph');
+function show() {
+  if (!onRequest.value && !tooBig.value && !inViewer.value && !preview.value) void content.open();
+}
+onMounted(show);
+watch(inViewer, show);
+
 function expand() {
-  viewer.open(props.item.id, props.version && props.version.version !== props.item.current_version ? props.version.version : null);
+  viewer.open(props.item.id, wanted.value);
 }
 </script>
 
@@ -35,14 +47,12 @@ function expand() {
   <div class="item-preview">
     <div class="row-actions">
       <a v-if="linkUrl" :href="linkUrl" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" data-testid="item-open-link">Open link ↗</a>
-      <button v-if="!preview && !tooBig" class="btn btn-outline btn-sm" :disabled="busy" data-testid="item-preview-open" @click="content.open()">
-        {{ busy ? 'Loading…' : 'Preview' }}
-      </button>
-      <button v-else-if="preview" class="btn btn-outline btn-sm" data-testid="item-preview-close" @click="content.close()">Close preview</button>
-      <button class="btn btn-outline btn-sm" title="Open in a large viewer (double-click the item in the material list)" data-testid="item-expand" @click="expand">⤢ Expand</button>
+      <button v-if="onRequest && !preview" class="btn btn-outline btn-sm" :disabled="busy || tooBig" data-testid="item-preview-open" @click="content.open()">{{ busy ? 'Loading…' : 'Show the data' }}</button>
+      <button v-else-if="!onRequest && !inViewer" class="btn btn-outline btn-sm" title="Read it where the canvas is" data-testid="item-expand" @click="expand">⤢ Open in the reader</button>
       <button class="btn btn-outline btn-sm" :disabled="busy" data-testid="item-download" @click="content.download()">Download</button>
     </div>
-    <p v-if="tooBig && !preview" class="muted">File too large to preview here; expand it or download it.</p>
+    <p v-if="tooBig && !preview" class="muted">File too large to show here; open it large or download it.</p>
+    <p v-else-if="busy && !preview" class="muted" data-testid="item-preview-loading">Loading…</p>
     <ItemPreviewBody v-if="preview" :preview="preview" :item="item" :content-type="contentType" :blob-url="blobUrl" size="compact" />
   </div>
 </template>

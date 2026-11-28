@@ -839,8 +839,11 @@ export const useInvestigationStore = defineStore('investigation', () => {
       for (const c of ctxs) if (c) contexts.value[c.id] = c;
       await loadEnrichments();
       sourceGraphs.value = graphs;
-      expansions.value = [];
-      derived.value = [];
+      // A reload (an item added or re-versioned, by anyone) keeps what the person expanded or
+      // promoted this session; only what hung on a source that left goes with it.
+      const live = new Set(graphs.map((g) => g.id));
+      expansions.value = expansions.value.filter((e) => live.has(baseSourceId(e.id)));
+      derived.value = derived.value.filter((d) => live.has(baseSourceId(d.id)));
     } finally {
       graphLoading.value = false;
     }
