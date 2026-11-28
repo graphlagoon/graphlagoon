@@ -269,7 +269,7 @@ Four tools read it, and only read:
 |---|---|---|
 | Find | `list_contexts(q?)` | The contexts you can read: title, description, node and relationship types, names of the declared sources. |
 | Understand | `describe_context(context_id)` | The author's **description**; the node and edge tables and which columns hold the id, the type and an edge's two ends; node and relationship types; properties with their types and descriptions; every table a query may read; and the **sources** (lookups, enrichment queries, providers) with their description, parameters and how to ask each one. |
-| | `describe_context(context_id, tables=[…])` | The same, plus the warehouse's own metadata for up to 10 of those tables: column names, types and comments (the Unity Catalog column comments on Databricks). |
+| | `describe_context(context_id, tables=[…])` | The same, plus the warehouse's own metadata for up to 10 of those tables (the ones a query may read): column names, types and comments (the Unity Catalog column comments on Databricks). |
 | Query | `query_context(context_id, query, language)` | Rows of one read-only SQL `SELECT` or Cypher query over the context's tables, with the same rules as the Query Console: no table outside the context, nothing but reads. 200 rows by default, 5,000 at most, so aggregate in the query. |
 | Ask a source | `query_source(context_id, name, ids)` | What one declared source knows about some ids: a lookup's rows per key, or the values an enrichment query or provider would write, per node id. Nothing is written to any graph. |
 | | `query_source(context_id, name, params={…})` | Rows from a **table source** (code the deployment registered, such as a call to an internal service), asked with the parameters the context lets a caller set. |

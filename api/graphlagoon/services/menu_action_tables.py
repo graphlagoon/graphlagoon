@@ -395,7 +395,7 @@ def find_source(context, action: dict) -> dict:
         wanted = name or action.get("provider") or ""
         names = ", ".join(t["name"] for t in declared) or "none"
         raise MenuActionError(
-            400, "TABLE_SOURCE_NOT_DECLARED",
+            404, "TABLE_SOURCE_NOT_DECLARED",
             f"This context declares no table source '{wanted}' (it has: {names}). Someone with the "
             '"Create graph contexts" permission declares one in the context form.',
         )

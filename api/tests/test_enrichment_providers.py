@@ -483,3 +483,15 @@ def test_a_provider_may_refuse_a_context_on_save_and_on_run(env):
     other = store.create_graph_context("pix2", "main.graphs.e", "main.graphs.n", OWNER)
     r = client.put(f"/api/graph-contexts/{other.id}", json={"enrichment_tables": [KYC]}, headers=_h(OWNER))
     assert r.status_code == 403
+
+
+def test_an_empty_context_value_runs_the_default_and_is_reported_as_such():
+    """What describe_context tells an agent is what a run uses: an empty value the
+    context saved counts as unset, for an enrichment as for a table source."""
+    from graphlagoon.services.enrichment import _context_value, resolve_provider_params
+
+    spec = ParamSpec("scheme", default="5-tier")
+    provider = EnrichmentProvider(name="p", enrich=lambda r: {}, targets=("nodes",), params=[spec])
+    assert resolve_provider_params(provider, {"params": {"scheme": ""}}, None) == {"scheme": "5-tier"}
+    assert _context_value({"scheme": ""}, spec) == "5-tier"
+    assert _context_value({"scheme": "3-tier"}, spec) == "3-tier"

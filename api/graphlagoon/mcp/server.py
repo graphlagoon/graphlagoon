@@ -1160,7 +1160,7 @@ def build_server():
         declared, each with its description, parameters, the columns it
         returns when declared, and under ``ask`` how query_source takes it. A
         source or column with no description is still usable: query it to see.
-        Pass ``tables`` (up to 10 names from the list) to add the warehouse's
+        Pass ``tables`` (up to 10 names from the list, ``sql_queryable`` ones) to add the warehouse's
         own metadata for them: column names, types and comments."""
         from graphlagoon.services import context_catalog
         from graphlagoon.services.warehouse import get_warehouse_client

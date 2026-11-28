@@ -237,7 +237,7 @@ def test_an_action_runs_only_through_a_source_the_context_declares(env):
     register_table_provider(_provider(recorder))
     ctx.enrichment_tables = []
     r = client.post(url, json={"target": NODE}, headers=h(READER))
-    assert r.status_code == 400 and r.json()["detail"]["error"]["code"] == "TABLE_SOURCE_NOT_DECLARED"
+    assert r.status_code == 404 and r.json()["detail"]["error"]["code"] == "TABLE_SOURCE_NOT_DECLARED"
     assert recorder.calls == []
     # An action written before sources existed names the provider: it finds the source that uses it.
     ctx.enrichment_tables = [_source()]

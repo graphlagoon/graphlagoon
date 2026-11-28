@@ -14546,3 +14546,17 @@ Also: `list_enrichments` now honours the case scope; the server instructions des
 **Public docs:** `python-api.md` (Table providers: declared by a context, who sets each parameter, `ColumnSpec`), `bring-your-own-data.md` (Declare a table source), `context-menu-actions.md` (the action picks a source), `agents-mcp.md`; screenshots `bring-your-own-data-table-source`, `context-menu-actions-table-provider`, `bring-your-own-data-enrichment-provider`; `agents-mcp-tools.md`, `openapi.json` regenerated. **Admin-area impact:** one read-only POST route added to `AUDIT_EXEMPT_ROUTES` (`/sources/{name}/table`); no setting, table or audit action.
 **Found on the way:** `routers/admin_registry.py` says the console query routes are "gated by query.freeform", but no such permission exists anywhere in the code: any reader of a context may run them. Left as is (not this change's to decide); the note is misleading.
 **Known limitations:** a table source's run is audited only for agents (`agent.read`), like a template table; the description label in a table-source row still reads "What it adds…".
+
+## [2026-11-27 22:30] - Fix: review of the context catalog and table sources
+
+**Context:** an independent read of the two previous entries' code (no rule broken: declaration takes `context.create`, closed parameters stay closed, case-scoped tokens stay in scope, queries stay read-only) found five smaller defects.
+**Changes:**
+1. *`describe_context(tables=…)` described an authorized table the allowed sources no longer reach* (an admin narrowed `enrichment_sources` after the context authorized it): its column names and comments came back through the app's warehouse client although a query on it is refused. Now refused too, `403 TABLE_NOT_ALLOWED`; the list still shows it with `sql_queryable: false`.
+2. *Editing an old action (one naming a `provider`) before any source used that provider saved `source: "<provider name>"`*, so the action never found a source declared later under another name. The editor now keeps the old shape (`source: ""`, `provider`) in that case, as the JSON import already did.
+3. *A node enrichment query asked by `query_source` gets no edges* (no graph): `ask.run.note` says so and points at `query_context`, instead of a silent empty match.
+4. *An empty context value was reported as `""` but ran as the default* for a table source, and ran as `""` for an enrichment. Both now treat it as unset, and `describe_tables` reports the value a run uses (`_context_value`).
+5. *An undeclared source answered 404 on the source route and 400 on the action route*: both 404 `TABLE_SOURCE_NOT_DECLARED`.
+Also: the `query.freeform` notes in `admin_registry.py` (a permission the code never had; rejected in an earlier entry) now say what limits those routes (`enforce_query_scope`); a table-source row's description label reads "What it returns and when to ask it".
+**Tests:** `test_mcp_contexts.py` (table outside the allowed sources), `test_enrichment_providers.py` (empty value), `ContextMenuActionsModal.tableProvider.test.ts` (old action kept in its shape), `test_table_providers.py` (404). Backend 1774 passed with the 16 known environmental failures; vitest 3261; `vue-tsc` clean.
+**Public docs:** `agents-mcp.md`, `agents-mcp-tools.md` regenerated. **Admin-area impact:** none (comments only).
+**Not changed:** a table source's run is still audited only for agents, like a template table: auditing every human read is a product decision, not a fix.
