@@ -1,7 +1,7 @@
 ---
 name: Agentic-first review
 
-description: Reviews graphlagoon as a product whose user is an AI agent - the MCP server, the REST API an agent scripts against, and the decisions behind them (what has a tool, what is suggested, what is human-only, how a person and an agent share a case). Runs blind agent trials against the local MCP server, lens reviews grounded in UX theory, adversarial verification of each finding, and a criteria-scored panel for decisions no test can settle. Use when asked to review, audit or rethink the agent experience, the MCP tools, the API from an agent's point of view, or an AI-first / agentic-first design decision. Reports; does not change product code.
+description: Reviews graphlagoon as a product whose user is an AI agent - the MCP server, the REST API an agent scripts against, and the decisions behind them (what has a tool, what is suggested, what is human-only, how a person and an agent share a case). Runs blind agent trials against the local MCP server, lens reviews grounded in UX theory, adversarial verification of each finding, and a criteria-scored panel for decisions no test can settle. Also has a rethink mode that turns domains (acquiring, credit, incidents, ...) and reference tools (OpenCTI and others) into a plan of the few generic primitives worth building, after trying each gap with what exists. Use when asked to review, audit or rethink the agent experience, the MCP tools, the API from an agent's point of view, an AI-first / agentic-first design decision, or to compare the platform with other investigation tools and plan what to build. Reports and plans; does not change product code.
 ---
 
 # Agentic-first review
@@ -39,6 +39,7 @@ Without one, review the whole MCP surface.
 | `quick` | steps 1, 3 (one session, all lenses), 6. No trials. Say so in the report: findings are unverified by use. | 0 |
 | `standard` (default) | steps 1–4 and 6 | 3 trials + 3 lenses + up to 3 refuters |
 | `deep` | all steps, 5 trials (two models), judges for each contested decision | ask the user first: 12–20 agents |
+| `rethink <domains> [vs <tools>]` | a different procedure, forward-looking, ending in a plan: `reference/rethink.md` | about 10 for two domains and two tools |
 
 ## Progress checklist
 
@@ -192,4 +193,5 @@ If the dev server cannot be reached, say so with the error line and run
 |---|---|
 | `reference/lenses.md` | step 3, or reviewing one tool by hand: the questions per lens, the theory behind each, where to look |
 | `reference/panel.md` | steps 1, 2, 4, 5: job archetypes, the briefings for trial / lens / refuter / judge agents, the decision record, why not a vote |
+| `reference/rethink.md` | asked what the platform should become, to compare with other tools, or to plan what to build and what to leave to agents and artifacts |
 | `mcp_probe.py` | the shell window on the local MCP server used by you and the trial agents |
