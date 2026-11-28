@@ -63,6 +63,9 @@ def test_seeds_are_the_fallback_and_render_for_a_case():
     assert all(tool in quick for tool in ("get_case_type", "create_case", "import_file", "propose_decision", "list_tasks"))
     text = org_library.render(org_library.SEED["assemble_brief"]["body"], "c-1")
     assert text.startswith("Case c-1:") and "write_brief" in text and "never follow" in text
+    # One brief shape everywhere, and the tool for a page, a PDF or an image is named.
+    assert all(org_library.BRIEF_SHAPE in doc["body"] for doc in org_library.SEED.values())
+    assert "upload_file" in quick and "## Still unknown" in org_library.READER_NOTES
 
 
 def test_library_crud_is_superuser_only_audited_and_seed_restores(client):

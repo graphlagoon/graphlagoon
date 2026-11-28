@@ -26,6 +26,30 @@ RULES = (
 )
 
 
+#: The one shape of a case brief: the server instructions, the playbooks and the
+#: prompt the app copies for a person all ask for it.
+BRIEF_SHAPE = (
+    "markdown, readable in two minutes, with these headings in this order: "
+    "'## What this case is about' (two or three sentences), '## Who is involved' (each with its role), "
+    "'## What is established' (one line per point, naming the item it rests on by its exact title), "
+    "'## Still unknown' and '## Suggested next steps'"
+)
+
+#: How a person meets an agent's work in the app: what makes it quick to review.
+READER_NOTES = (
+    "How a person reads your work: each item opens in a reader and is judged one at a time, so add one item "
+    "per finding, with a short title (under 40 characters, the finding itself, no 'Finding:' or 'Table:' "
+    "prefix: the list already shows the kind and cuts long titles), and cite other items by their exact title. "
+    "upload_file takes a report page (HTML), a PDF or an image; a page is shown isolated, with no network and "
+    "possibly no scripts: inline its styles, data and images. A graph item you add is not on the canvas until a "
+    "person ticks it: say so in a note. Your notes, documents and tables are suggestions only when the case "
+    "lists their kind in agent_suggest_kinds (get_case shows it); otherwise they enter as confirmed, so state "
+    "plainly what is uncertain. The brief (write_brief) is the first thing a person reads: "
+    f"{BRIEF_SHAPE}. When you rewrite it, keep the headings and the lines that did not change exactly as they "
+    "were: the person sees a line-by-line diff of your rewrite."
+)
+
+
 def _steps(goal: str, *steps: str) -> str:
     numbered = "\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1))
     return f"Case {{investigation_id}}: {goal}.\n\n{numbered}"
@@ -42,14 +66,16 @@ SEED: dict[str, dict[str, str]] = {
             "external_ref: the same ref twice returns the same case). Read the brief (`get_brief`), the material "
             "(`list_items`, `read_item`: text, and images you can look at) and your tasks (`list_tasks`).",
             "Bring data in: `import_file` (CSV or fixed-width text, with a mapping to the canvas), `add_table`, "
-            "`save_query` + `run_query` against a context, or `add_document`. Bigger files: POST them to the "
-            "items route with the same token.",
+            "`save_query` + `run_query` against a context, `add_document` for text, or `upload_file` for a "
+            "report page (HTML, self-contained), a PDF or an image. Bigger files: POST them to the items route "
+            "with the same token. One item per finding, with a short title: a person reads them one at a time.",
             "Analyse: `get_graph`, `search_entities`, `get_entity`, `run_analysis` (trace, paths, er, links, "
             "communities); `find_entity_cases` shows where an entity appeared before.",
             "Record what you found: `annotate` (roles and tags from the vocabulary, hypotheses, with the reason), "
             "`group`, `add_note`, `add_task` for follow-ups (a person or an agent by name), and pin what you rely "
             "on (`pin_evidence`). Show tables as charts with `update_item(chart=…)`.",
-            "Write it up: `write_brief`, and `render_report` with the type's template when there is one.",
+            f"Write it up: `write_brief` ({BRIEF_SHAPE}; on a rewrite keep the unchanged lines as they were, a "
+            "person sees the diff), and `render_report` with the type's template when there is one.",
             "Propose the decision with `propose_decision` (outcome from the catalog, targets, tasks, rationale "
             "citing E1, E2…). A person records it in the app; you never decide. Afterwards, `list_tasks` and "
             "`changes_since` tell you what is yours.",
@@ -65,8 +91,7 @@ SEED: dict[str, dict[str, str]] = {
             "involved, and how they connect (`run_analysis` kind links or communities when it helps).",
             "Note what you found (`add_note`, anchored on entities when it is about them) and suggest "
             "roles and tags from the case vocabulary (`annotate`, with the reason).",
-            "Write the brief (`write_brief`): what happened, who is involved, what is still unknown and "
-            "what to do next. Cite item titles; do not invent facts.",
+            f"Write the brief (`write_brief`): {BRIEF_SHAPE}. Do not invent facts.",
         ),
     },
     "assemble_brief": {
@@ -78,9 +103,10 @@ SEED: dict[str, dict[str, str]] = {
             "Make sure each claim rests on a pinned version: pin the items you rely on (`pin_evidence`).",
             "Suggest the hypotheses that are missing (`annotate` kind hypothesis) and status changes of "
             "existing ones (kind hypothesis_status, citing the evidence).",
-            "Write the brief (`write_brief`): summary, sources, entities and roles, the key findings, "
-            "hypotheses with what supports and contradicts each, open questions. Cite item titles and "
-            "hashes; do not invent facts. The decision is the person's.",
+            f"Write the brief (`write_brief`): {BRIEF_SHAPE}. Under 'What is established' add the hypotheses, "
+            "with what supports and what contradicts each, and the evidence label (E1, E2…) of a pinned item "
+            "next to its title. Keep the unchanged lines of the previous brief as they were. Do not invent "
+            "facts. The decision is the person's.",
         ),
     },
 }

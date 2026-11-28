@@ -141,6 +141,18 @@ AGENT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
 }
 
 
+#: Tools that only read: every tool whose routes are all GET, plus the reads that
+#: travel in a POST body (a query, a comparison, a lookup). Stamped on the tool as
+#: ``annotations.readOnlyHint`` so a client can let them run without asking each time.
+READ_ONLY_TOOLS: frozenset[str] = frozenset(
+    {tool for tool, routes in TOOL_ROUTES.items() if all(method == "GET" for method, _ in routes)}
+    | {"query_context", "query_source", "compare_tables", "lookup_enrichment"}
+)
+
+#: Writes that can remove what is there (the rest only add or version).
+DESTRUCTIVE_TOOLS: frozenset[str] = frozenset({"edit_exploration"})
+
+
 def human_only_routes() -> set[tuple[str, str]]:
     return {r for r, why in AGENT_EXEMPT_ROUTES.items() if why.startswith(HUMAN_ONLY)}
 

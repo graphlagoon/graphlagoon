@@ -49,7 +49,7 @@ Human twin: `GET /api/investigations`
 
 ### get_case
 
-Case summary: status and stage, its case type (label, outcomes, actions, fields, stages, notice, playbook), its fields, tags, settings (vocabularies, agent_suggest_kinds), deadline, the decisions so far (outcome, targets, review, hash), the confirmed roles and the counts of items, suggestions and entities.
+Case summary: status and stage, its case type (label, outcomes, actions, fields, stages, notice, playbook), its fields, tags, settings (vocabularies), agent_suggest_kinds (the kinds of your writes that arrive as suggestions here: item kinds such as note, document, table and annotation kinds such as role, tag), deadline, the decisions so far (outcome, targets, review, hash), the confirmed roles and the counts of items, suggestions and entities.
 
 Human twin: `GET /api/investigations/{investigation_id}`
 
@@ -104,7 +104,7 @@ Human twin: `GET /api/investigations/{investigation_id}/brief`
 
 ### write_brief
 
-Write the case brief (markdown): a new version of the brief item, attributed to you. Cite item titles and hashes; never invent facts.
+Write the case brief: a new version of the brief item, attributed to you. It is the first thing a person reads on the case, in the shape the server instructions give (What this case is about / Who is involved / What is established / Still unknown / Suggested next steps), each established point naming the item it rests on by its exact title. On a rewrite, read get_brief first and keep the unchanged lines as they were: the person sees a line diff. Never invent facts.
 
 Human twin: `PUT /api/investigations/{investigation_id}/brief`
 

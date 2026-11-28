@@ -30,7 +30,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from graphlagoon.config import get_settings
-from graphlagoon.mcp.registry import human_equivalent
+from graphlagoon.mcp.registry import DESTRUCTIVE_TOOLS, READ_ONLY_TOOLS, human_equivalent
 from graphlagoon.middleware import auth
 from graphlagoon.services import (
     audit,
@@ -54,6 +54,27 @@ IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpeg", "image/gif": "gif", "im
 
 def _out(data: Any) -> dict:
     return {"untrusted_data": json.loads(json.dumps(data, default=str))}
+
+
+def shown_as(media_type: str) -> str:
+    """How the app shows a file of this type to a person (frontend utils/itemPreview):
+    what an agent that cannot see the screen is told about its upload."""
+    kind = (media_type or "").lower().split(";")[0].strip()
+    if kind in ("text/html", "image/svg+xml"):
+        return "a page, isolated: no network, scripts may be off; inline its styles, data and images"
+    if kind == "application/pdf":
+        return "a PDF, inline"
+    if kind in ("image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/avif"):
+        return "an image, with zoom"
+    if kind in ("text/csv", "text/tab-separated-values"):
+        return "a table (the first 2,000 rows), or a chart"
+    if kind.startswith("text/") or kind == "application/json":
+        return "text (markdown is rendered; JSON with columns and rows is a table)"
+    return "not shown in the browser: a person can only download it"
+
+
+#: The brief's headings (services/org_library.BRIEF_SHAPE), to tell an agent which it left out.
+BRIEF_HEADINGS = ("What this case is about", "Who is involved", "What is established", "Still unknown", "Suggested next steps")
 
 
 def resolve_uid(graph: dict, given: str, kind: str = "node") -> str:
@@ -399,6 +420,7 @@ def build_server():
     """A fresh MCPServer with the case tools (one per app: the session
     manager's ``run()`` may be entered only once)."""
     from mcp.server.mcpserver import Context, MCPServer
+    from mcp.types import ToolAnnotations
 
     server = MCPServer(
         name="graphlagoon",
@@ -415,12 +437,19 @@ def build_server():
             "describe_context (its tables, types, properties and declared "
             "sources, with the author's description of what they mean), then "
             "query_context (read-only SQL or Cypher over its tables) or "
-            "query_source (one declared source, by name). These four only read."
+            "query_source (one declared source, by name). These four only read. "
+            + org_library.READER_NOTES
         ),
     )
 
     def tool(name: str, **kwargs):
-        return server.tool(name=name, meta={"human_equivalent": human_equivalent(name)}, **kwargs)
+        read_only = name in READ_ONLY_TOOLS
+        hints = ToolAnnotations(
+            read_only_hint=read_only,
+            destructive_hint=False if read_only else name in DESTRUCTIVE_TOOLS,
+            open_world_hint=False,
+        )
+        return server.tool(name=name, annotations=hints, meta={"human_equivalent": human_equivalent(name)}, **kwargs)
 
     # -- cases ----------------------------------------------------------------
 
@@ -472,7 +501,9 @@ def build_server():
     async def get_case(ctx: Context, investigation_id: UUID) -> dict:
         """Case summary: status and stage, its case type (label, outcomes,
         actions, fields, stages, notice, playbook), its fields, tags, settings
-        (vocabularies, agent_suggest_kinds), deadline, the decisions so far
+        (vocabularies), agent_suggest_kinds (the kinds of your writes that
+        arrive as suggestions here: item kinds such as note, document, table
+        and annotation kinds such as role, tag), deadline, the decisions so far
         (outcome, targets, review, hash), the confirmed roles and the counts
         of items, suggestions and entities."""
         user = _agent(ctx)
@@ -488,6 +519,8 @@ def build_server():
                 "case_type": {k: kind.get(k) for k in ("slug", "label", "description", "outcomes", "actions",
                                                        "fields", "stages", "notice", "playbook")},
                 "roles": {a["targets"][0]: a["value"]["role"] for a in annotations if a["kind"] == "role" and a["status"] == "confirmed"},
+                # What of this agent's writes waits for a person here (the default when the case sets none).
+                "agent_suggest_kinds": list((case.get("settings") or {}).get("agent_suggest_kinds") or service.DEFAULT_SUGGEST_KINDS),
                 "items": len(items),
                 "suggested": sum(x["status"] == "suggested" for x in [*items, *annotations]),
                 "entities": len(graph["nodes"]),
@@ -548,10 +581,18 @@ def build_server():
 
     @tool("write_brief")
     async def write_brief(ctx: Context, investigation_id: UUID, text: str) -> dict:
-        """Write the case brief (markdown): a new version of the brief item,
-        attributed to you. Cite item titles and hashes; never invent facts."""
+        """Write the case brief: a new version of the brief item, attributed to
+        you. It is the first thing a person reads on the case, in the shape the
+        server instructions give (What this case is about / Who is involved /
+        What is established / Still unknown / Suggested next steps), each
+        established point naming the item it rests on by its exact title. On a
+        rewrite, read get_brief first and keep the unchanged lines as they
+        were: the person sees a line diff. Never invent facts."""
         user = _agent(ctx)
-        return _out(await _call(case_items.put_brief(investigation_id, user, text)))
+        brief = await _call(case_items.put_brief(investigation_id, user, text))
+        lowered = text.lower()
+        missing = [h for h in BRIEF_HEADINGS if f"## {h.lower()}" not in lowered]
+        return _out({**brief, "version": (brief["item"] or {}).get("current_version"), "missing_headings": missing})
 
     @tool("list_items")
     async def list_items(ctx: Context, investigation_id: UUID, kind: Optional[str] = None,
@@ -825,7 +866,8 @@ def build_server():
         media_type = case_items.normalize_content_type(content_type) or mimetypes.guess_type(name)[0] \
             or "application/octet-stream"
         if item_id is not None:
-            return _out(await _call(case_items.add_version(investigation_id, user, item_id, data, media_type)))
+            version = await _call(case_items.add_version(investigation_id, user, item_id, data, media_type))
+            return _out({**version, "shown_as": shown_as(media_type)})
         subkind = subkind or ("csv" if kind == "table" else "upload")
         try:
             case_items.check_kind(kind, subkind)
@@ -843,7 +885,7 @@ def build_server():
             metadata={"item_id": str(item["id"]), "kind": f"{item['kind']}/{item['subkind']}", "title": item["title"],
                       "sha256": (item["latest"] or {}).get("sha256"), "size_bytes": len(data)},
         )
-        return _out(item)
+        return _out({**item, "shown_as": shown_as(media_type)})
 
     @tool("list_explorations")
     async def list_explorations(ctx: Context, context_id: Optional[UUID] = None, q: Optional[str] = None,

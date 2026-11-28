@@ -149,7 +149,13 @@ walks the agent through it:
    `add_item(kind="graph", subkind="view")` to save a view of the canvas (the
    format is in the tool description; a wrong shape is `INVALID_CONTENT`).
 6. **Write it up.** `write_brief`, and `render_report(template)` with the case
-   type's report template: a markdown draft that arrives *suggested*.
+   type's report template: a markdown draft that arrives *suggested*. The
+   brief has one shape, the same in the server instructions and in every
+   playbook: *What this case is about*, *Who is involved*, *What is
+   established* (each point naming the item it rests on by its title), *Still
+   unknown*, *Suggested next steps*. A person reads it first and, from the
+   second version on, as a line diff, so an agent keeps the unchanged lines as
+   they were.
 7. **Propose the decision.** `propose_decision(outcome, targets, tasks,
    rationale)` stores a draft; the person sees **Decision proposed** in the
    case header and the decision panel already filled in, then records it
@@ -375,6 +381,23 @@ playbook its cases start with.
 
 Domain playbooks (a Pix scam, a merchant review, a credit group, a synthetic
 identity ring) are the org's own docs, written in the admin area.
+
+## What an agent is told when it connects
+
+Besides the tools, the server sends every client its instructions: whose
+access the agent has, what it never does, which kinds arrive as suggestions,
+how to read data without a case, and **how a person reads its work** — one
+item per finding with a short title, the brief's shape, a report page
+(`upload_file`, HTML) that must be self-contained because it is shown with no
+network, a graph item that is not on the canvas until a person ticks it, and
+that notes, documents and tables are suggestions only when the case lists
+their kind in `agent_suggest_kinds`.
+
+Each tool also says whether it only reads (`annotations.readOnlyHint`), so a
+client such as Claude Desktop can let the reads run without asking each time;
+`edit_exploration`, which can remove nodes and edges, is the one marked
+destructive. The playbooks are extra: an agent asks for one (`get_playbook`)
+or the person picks it as a prompt.
 
 ## Reviewing the agent's work
 
