@@ -223,6 +223,6 @@ def check_scope(
             f"This query reads tables outside the current context: {listed}. "
             "A query may only read the context's graph tables and its "
             "authorized enrichment tables; a context author can add a table "
-            "under Enrichment tables."
+            "in the context form, under Enrichments and data sources."
         )
     return None

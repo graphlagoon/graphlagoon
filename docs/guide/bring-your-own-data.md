@@ -151,7 +151,7 @@ behind an edge, the channel from a second table, an account's activity in the la
 
 ### Which tables a query may read
 
-The context's **Enrichments** list (context form, `enrichment_tables` in the API and in YAML) is its list of **authorized tables**, plus any [providers](#enrich-from-a-provider). It may be empty or
+The context's **Enrichments and data sources** list (context form, `enrichment_tables` in the API and in YAML) is its list of **authorized tables**, plus any [providers](#enrich-from-a-provider). It may be empty or
 hold many. Being listed is what authorizes a table: a query may read only the listed tables and the context's
 own edge and node tables, nothing else. Each entry can carry a query, and can also look nodes up by key for
 the [investigation inspector](./investigations.md#enrichment-tables) (**Node lookup in the investigation
@@ -217,7 +217,7 @@ relevant to some questions, and say so in its description.
 A **provider** is code the deployment registered in Python (see
 [Python API → Enrichment providers](./python-api.md#enrichment-providers)): it gets the same batches a query
 gets and returns new properties per edge or node id, reading whatever the server can reach, typically a
-Lakebase table. When the server has any, the **Enrichments** header shows **+ Attach provider**: pick
+Lakebase table. When the server has any, the **Enrichments and data sources** header shows **+ Attach provider**: pick
 the provider, what it enriches (only the targets it supports are offered), when it runs, and the same
 **Replace values** and **Send node properties** switches as a query, plus **Send edge properties** (off by
 default: the provider gets ids and types only). A provider entry has no table and no SQL. When the provider
@@ -250,9 +250,42 @@ context, and every run is audited as `enrichment.run`, like a query. A context w
 from the server still opens: the entry says *not registered on this server* and its runs fail with
 `ENRICHMENT_PROVIDER_NOT_REGISTERED`.
 
+### Declare a table source
+
+A **table source** enriches nothing. It declares that this context may use a
+[table provider](./python-api.md#table-providers) the deployment registered: code that returns **rows about
+one node or edge** (the transactions of this account from the ledger service). When the server has any, the
+header shows **+ Attach table source**:
+
+- **Name** is the context's own name for it. Right-click actions and AI agents use the source by this entry's
+  name, never by the provider's.
+- **What it adds and when to use it**: your description; without one, the provider's is shown.
+- **Parameters**: your value for each (empty: the provider's default), and **Set by whoever asks** on the ones
+  a caller may give: the action's binding to the clicked item, a person in the table window, an agent. Leave it
+  unticked on a parameter that scopes the data for this context (a tenant, a region): your value is then the
+  only one ever used.
+
+```yaml
+enrichment_tables:
+  - name: tx_history
+    label: Transactions (ledger)
+    description: Transactions of one account, newest first. Give the account id.
+    table_provider:
+      name: tx-history               # a table provider registered on this server
+      params: {tenant: br}           # this context's values
+      runtime_params: [account, days]   # what an action or an agent may set
+```
+
+![A table source in the context form: the provider under the context's own name, and what a caller may set](/screenshots/bring-your-own-data-table-source.png)
+
+The declaration is what makes the provider usable here, and it takes **Create graph contexts**, like every
+entry of this list: someone who can only edit the context cannot attach one, though they can then use a
+declared source in a [right-click action](./context-menu-actions.md#table-provider). A source whose provider
+is later removed from the server stays listed and says so; actions that use it hide.
+
 ### Import YAML, or ask an AI
 
-The **Enrichments** header has three helpers besides **+ Attach table** (and **+ Attach provider**):
+The **Enrichments and data sources** header has three helpers besides **+ Attach table** (and **+ Attach provider**, **+ Attach table source**):
 
 - **Import YAML** takes a list pasted or from a `.yaml` / `.json` file. Entries with the same `name` replace
   the ones in the form; the others are added; an entry that is wrong is skipped and says why. Nothing is saved
@@ -260,9 +293,9 @@ The **Enrichments** header has three helpers besides **+ Attach table** (and **+
 - **Export YAML** shows the current entries as YAML (and copies them), to edit, review or move to another
   context.
 - **Ask an AI** builds a prompt for any AI assistant with this context's tables, columns, properties, types and
-  current entries, plus the rules above and **every enrichment provider registered on the server**: its
-  name, what it adds, what it enriches, the properties it writes and each parameter with its type, default
-  and limits. Describe what you want at the end; paste the YAML it answers into **Import YAML**. The prompt
+  current entries, plus the rules above and **every enrichment provider and table provider registered on
+  the server**: its name, what it adds or returns, what it applies to, and each parameter with its type,
+  default and limits. Describe what you want at the end; paste the YAML it answers into **Import YAML**. The prompt
   holds table and column names, no data.
 
 ![The context form: Enrichments with Import YAML and Ask an AI](/screenshots/bring-your-own-data-enrichment-tables.png)

@@ -1209,10 +1209,16 @@ def build_server():
     @tool("query_source")
     async def query_source(ctx: Context, context_id: UUID, name: str, ids: Optional[list[str]] = None,
                            items: Optional[list[dict[str, Any]]] = None,
-                           params: Optional[dict[str, Any]] = None, how: Optional[str] = None) -> dict:
+                           params: Optional[dict[str, Any]] = None, how: Optional[str] = None,
+                           row_limit: int = 200) -> dict:
         """Ask one declared source of a context (a ``name`` under ``sources``
-        in describe_context) about some ids, and get its values back; nothing
-        is written to any graph. Its ``ask`` says what to pass.
+        in describe_context) and get its values back; nothing is written to
+        any graph. Its ``ask`` says what to pass.
+        how="table" (a table source: rows from code the deployment registered,
+        e.g. an internal service): ``params`` sets its ``overridable``
+        parameters, the others keep the context's values; returns ``columns``
+        and ``rows`` (``row_limit`` 200 by default, 5000 at most). Pass one id
+        in ``ids`` when its ``ask`` says it reads the item it is about.
         how="lookup": ``ids`` are key values; returns ``rows`` {id: [row]}.
         how="run" (an enrichment query or provider): ``ids`` are node ids;
         returns ``rows`` {id: {column: value}} for the ids it knows. Use
@@ -1229,9 +1235,17 @@ def build_server():
         user = _agent(ctx)
         context = await _readable_context(user, context_id)
         try:
-            result = await context_catalog.query_source(get_warehouse_client(), context, user, name, ids, items, params, how)
+            result = await context_catalog.query_source(get_warehouse_client(), context, user, name, ids, items,
+                                                        params, how, row_limit)
         except context_catalog.CatalogError as exc:
             raise _catalog_error(exc) from exc
+        if result["how"] == "table":
+            await audit.record(
+                user, AuditAction.AGENT_READ, resource_type="graph_context", resource_id=context.id,
+                metadata={"tool": "query_source", "table_source": name, "rows": result["row_count"],
+                          "truncated": result["truncated"], "params": result["params"]},
+            )
+            return _out(result)
         ran = result["how"] == "run"
         await audit.record(
             user, AuditAction.ENRICHMENT_RUN if ran else AuditAction.ENRICHMENT_READ,
@@ -1709,9 +1723,11 @@ def build_server():
         days"): each with its parameters, the value each one would take for this
         entity, and what is still missing. Run one with run_entity_action.
         ``source`` says where the rows come from: "warehouse" (a query
-        template), "provider" (code the deployment registered, e.g. a call to
-        an internal service; ``description`` says what it returns; a parameter
-        with ``locked: true`` is fixed by the action) or "canvas" (computed from the case graph: a neighbors walk,
+        template), "provider" (a table source of the context: code the
+        deployment registered, e.g. a call to an internal service;
+        ``description`` says what it returns; a parameter with ``locked: true``
+        is set by the context or fixed by the action; query_source asks the
+        same source with no entity) or "canvas" (computed from the case graph: a neighbors walk,
         which runs here, or a JavaScript program, ``runs_in: "browser"``,
         listed with its code for reference)."""
         from graphlagoon.services import menu_action_tables as mat
@@ -1726,13 +1742,15 @@ def build_server():
                     continue
                 if mat.is_provider_action(action):
                     try:
-                        provider = mat.find_provider(context, action, target)
+                        entry = mat.find_source(context, action)
+                        provider = mat.find_provider(context, entry, target)
                     except mat.MenuActionError:
-                        continue  # not registered here, or not for this item or context
-                    parameters, problems, _ = mat.bind_provider_parameters(provider, action, target, {})
+                        continue  # not declared in the context, not registered here, or not for this item
+                    parameters, problems, _ = mat.bind_provider_parameters(provider, entry, action, target, {})
                     actions.append({
                         "context_id": str(context.id), "action_id": action["id"], "label": action.get("label"),
-                        "provider": provider.name, "description": provider.description or None,
+                        "table_source": entry["name"], "provider": provider.name,
+                        "description": entry.get("description") or provider.description or None,
                         "query_type": "provider", "parameters": parameters, "missing": problems,
                         "source": "provider", "runs_in": "server",
                     })

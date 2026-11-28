@@ -4,7 +4,7 @@
  * enrichment-only schemas and tables). The server decides on save and on every run; this only
  * lets the form warn early. Pure.
  */
-import type { EnrichmentProviderInfo, TableProviderInfo } from '@/types/graph';
+import type { EnrichmentProviderInfo, EnrichmentTable, ProviderParamInfo, TableProviderInfo } from '@/types/graph';
 
 const bare = (part: string) => part.trim().replace(/`/g, '').toLowerCase();
 
@@ -24,6 +24,59 @@ export function configuredEnrichmentProviders(): EnrichmentProviderInfo[] {
 export function configuredTableProviders(): TableProviderInfo[] {
   const providers = window.__GRAPH_LAGOON_CONFIG__?.table_providers;
   return Array.isArray(providers) ? providers : [];
+}
+
+/** A table source of a context, joined with what the server says about its provider. */
+export interface TableSourceInfo {
+  /** The context's name for it: what an action's `source` holds. */
+  name: string;
+  label: string;
+  /** The entry's description, else the provider's registered one. */
+  description: string;
+  provider: string;
+  /** False: the provider is not registered on this server (the source cannot run here). */
+  registered: boolean;
+  targets: ('node' | 'edge')[];
+  columns: string[];
+  /** The parameters the context lets a caller set: an action binds or fixes these. */
+  params: ProviderParamInfo[];
+  /** The parameters the context closed, with the value it uses. */
+  locked: { name: string; value: string }[];
+}
+
+/** The table sources a context declares (`enrichment_tables` entries with `table_provider`). */
+export function contextTableSources(
+  tables: EnrichmentTable[] | null | undefined,
+  providers: TableProviderInfo[] = configuredTableProviders(),
+): TableSourceInfo[] {
+  return (tables ?? []).flatMap((entry) => {
+    const ref = entry.table_provider;
+    if (!ref?.name) return [];
+    const provider = providers.find((p) => p.name === ref.name);
+    const opened = new Set(ref.runtime_params ?? []);
+    const declared = provider?.params ?? [];
+    const text = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+    return [{
+      name: entry.name,
+      label: entry.label,
+      description: entry.description?.trim() || provider?.description?.trim() || '',
+      provider: ref.name,
+      registered: !!provider,
+      targets: provider?.targets ?? [],
+      columns: provider?.columns ?? [],
+      // The context's value, when it sets one, is what applies when nobody says otherwise.
+      params: declared.filter((p) => opened.has(p.name)).map((p) => ({ ...p, default: ref.params?.[p.name] ?? p.default })),
+      locked: declared.filter((p) => !opened.has(p.name)).map((p) => ({ name: p.name, value: text(ref.params?.[p.name] ?? p.default) })),
+    }];
+  });
+}
+
+/** The source an action points at: by `source`, or (an action older than sources) the first one using its `provider`. */
+export function actionTableSource(
+  action: { source?: string; provider?: string },
+  sources: TableSourceInfo[],
+): TableSourceInfo | undefined {
+  return action.source ? sources.find((s) => s.name === action.source) : sources.find((s) => s.provider === action.provider);
 }
 
 /** Targets one enrichment run may carry: the server's `enrichment_max_keys` (500 when it does not say). */

@@ -1190,7 +1190,7 @@
   },
   {
    "name": "query_source",
-   "summary": "Ask one declared source of a context (a ``name`` under ``sources`` in describe_context) about some ids, and get its values back; nothing is written to any graph."
+   "summary": "Ask one declared source of a context (a ``name`` under ``sources`` in describe_context) and get its values back; nothing is written to any graph."
   },
   {
    "name": "read_item",

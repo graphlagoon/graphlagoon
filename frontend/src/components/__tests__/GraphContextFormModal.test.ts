@@ -505,6 +505,51 @@ describe('GraphContextFormModal', () => {
       }
     })
 
+    it('declares a table source: a table provider under the context\'s own name, open by default', async () => {
+      const context = createGraphContext({ id: 'ctx-edit' })
+      vi.mocked(api.updateGraphContext).mockResolvedValue(context)
+      const first = renderModal({ open: true, mode: 'edit', context })
+      await flush()
+      expect(first.queryByTestId('enrichment-add-table-source')).toBeNull()
+      first.unmount()
+
+      window.__GRAPH_LAGOON_CONFIG__ = {
+        table_providers: [{
+          name: 'tx-history', label: 'Transactions (ledger)', description: 'Transactions of one account', targets: ['node'],
+          columns: ['at', 'amount'],
+          params: [
+            { name: 'account', type: 'str', required: true, default: null, description: 'Account id', choices: null, min: null, max: null },
+            { name: 'tenant', type: 'str', required: false, default: 'br', description: '', choices: ['br', 'pt'], min: null, max: null },
+          ],
+        }],
+      }
+      try {
+        const { getByTestId, queryByTestId } = renderModal({ open: true, mode: 'edit', context })
+        await flush()
+        await fireEvent.click(getByTestId('enrichment-add-table-source'))
+        expect((getByTestId('enrichment-label') as HTMLInputElement).value).toBe('Transactions (ledger)')
+        expect(getByTestId('enrichment-provider-columns').textContent).toContain('Returns: at, amount')
+        expect(getByTestId('enrichment-table-source-hint').textContent).toContain('only this context can')
+        // Not an enrichment: nothing about targets, runs or what is sent.
+        expect(queryByTestId('enrichment-provider-target')).toBeNull()
+        expect(queryByTestId('enrichment-provider-edge-props')).toBeNull()
+        // Every parameter starts open; the author closes the one that scopes the data.
+        expect((getByTestId('enrichment-provider-runtime-account') as HTMLInputElement).checked).toBe(true)
+        await fireEvent.update(getByTestId('enrichment-provider-param-tenant'), 'pt')
+        await fireEvent.click(getByTestId('enrichment-provider-runtime-tenant'))
+        await fireEvent.click(getByTestId('create-context-submit'))
+        await flush()
+        const [, payload] = vi.mocked(api.updateGraphContext).mock.calls[0]
+        expect(payload.enrichment_tables).toEqual([{
+          name: 'transactions_ledger',
+          label: 'Transactions (ledger)',
+          table_provider: { name: 'tx-history', params: { tenant: 'pt' }, runtime_params: ['account'] },
+        }])
+      } finally {
+        delete window.__GRAPH_LAGOON_CONFIG__
+      }
+    })
+
     it('names the allowed sources and warns on a table outside them', async () => {
       window.__GRAPH_LAGOON_CONFIG__ = { enrichment_sources: ['main.graphs', 'main.risk', 'ext.kyc.people'] }
       try {

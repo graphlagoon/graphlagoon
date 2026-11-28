@@ -537,10 +537,26 @@ class EnrichmentProviderRef(BaseModel):
     runtime_params: list[str] = Field(default_factory=list, max_length=32)
 
 
+class TableProviderRef(BaseModel):
+    """A table source of the context: a table provider the deployer registered in
+    Python (``services/table_providers.py``), declared here under the entry's
+    ``name``. Right-click actions and agents use it by that name, never by the
+    provider's own."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,49}$")
+    # The context's values for the parameters the provider declares.
+    params: dict[str, Union[bool, int, float, str]] = Field(default_factory=dict, max_length=32)
+    # The parameters whoever uses the source may set (an action's binding or fixed
+    # value, a person in the table window, an agent). Empty: none.
+    runtime_params: list[str] = Field(default_factory=list, max_length=32)
+
+
 class EnrichmentTable(BaseModel):
-    """One authorized table of a context. Optionally a node-key lookup
-    (``key_column`` set) and/or an edge enrichment ``query``. Or, with no table,
-    an enrichment by a registered ``provider``."""
+    """One entry of what a context may read beyond its graph: an authorized table,
+    optionally with a node-key lookup (``key_column`` set) and/or an enrichment
+    ``query``; or, with no table, an enrichment by a registered ``provider``; or a
+    table source (``table_provider``): rows about one item from registered code."""
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,40}$")
     label: str = Field(min_length=1, max_length=100)
@@ -558,6 +574,7 @@ class EnrichmentTable(BaseModel):
     # Whether the provider is registered is checked on save and on run, not here:
     # responses validate this model too, and one removed later must not break reads.
     provider: Optional[EnrichmentProviderRef] = None
+    table_provider: Optional[TableProviderRef] = None
 
     @property
     def has_lookup(self) -> bool:
@@ -570,7 +587,9 @@ class EnrichmentTable(BaseModel):
             validate_identifier_part,
         )
 
-        if self.provider is not None:
+        if self.provider is not None and self.table_provider is not None:
+            raise ValueError("an entry is an enrichment provider or a table source, not both")
+        if self.provider is not None or self.table_provider is not None:
             if self.table or self.query or self.key_column or self.match_node_types \
                     or self.columns or self.promote:
                 raise ValueError("a provider entry has no table, query or lookup")
@@ -641,6 +660,14 @@ class MenuActionTarget(BaseModel):
 
 class MenuActionTableRequest(BaseModel):
     target: MenuActionTarget
+    parameters: dict[str, Optional[str]] = Field(default_factory=dict)
+    row_limit: int = Field(default=1000, ge=1, le=100000)
+
+
+class TableSourceRequest(BaseModel):
+    """A table source asked directly: the open parameters and, optionally, the item it is about."""
+
+    target: Optional[MenuActionTarget] = None
     parameters: dict[str, Optional[str]] = Field(default_factory=dict)
     row_limit: int = Field(default=1000, ge=1, le=100000)
 
@@ -793,8 +820,8 @@ class GraphContextCreate(BaseModel):
         "runs on the server: POST /api/graph-contexts/{id}/menu-actions/{action_id}/table. A "
         "show-table action computes its rows in the browser from the loaded graph (a neighbors "
         "walk or a sandboxed JavaScript program); agents run its neighbors walk on a case graph "
-        "through the MCP tool run_entity_action. A run-table-provider action runs a table provider "
-        "the deployment registered (provider, paramBindings, params) through the same route.",
+        "through the MCP tool run_entity_action. A run-table-provider action runs a table source the "
+        "context declares in enrichment_tables (source, paramBindings, params) through the same route.",
     )
     metric_definitions: list[MetricDefinition] = Field(
         default_factory=list,

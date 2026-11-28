@@ -131,7 +131,8 @@
                   query template ids: {{ importWarnings.missingTemplateIds.join(', ') }}
                 </li>
                 <li v-if="importWarnings.missingProviders.length" data-testid="menu-action-import-missing-providers">
-                  table providers not registered on this server (these actions stay hidden):
+                  table sources this context does not declare (these actions stay hidden until someone
+                  declares them in the context form):
                   {{ importWarnings.missingProviders.join(', ') }}
                 </li>
                 <li v-if="importWarnings.sessionMetricRefs.length">
@@ -176,8 +177,8 @@
                 <option value="run-query-template">Run query template</option>
                 <option value="show-same-value">Show only nodes with…</option>
                 <option value="show-table">Table from the canvas</option>
-                <option value="run-table-provider" :disabled="tableProviders.length === 0">
-                  Table from a provider{{ tableProviders.length === 0 ? ' (none registered on this server)' : '' }}
+                <option value="run-table-provider" :disabled="tableSources.length === 0">
+                  Table from a provider{{ tableSources.length === 0 ? ' (this context declares no table source)' : '' }}
                 </option>
               </select>
 
@@ -421,32 +422,39 @@
 
             <div v-else-if="editing.kind === 'run-table-provider'" class="kind-fields" data-testid="menu-action-table-provider">
               <p class="hint">
-                Rows about the clicked item from code this deployment registered (for example a call to
-                an internal service). Runs on the server, opens in the same table window as a query
-                template's table, works on a case canvas, and agents can run it (<code>run_entity_action</code>).
-                <a :href="guideUrl('python-api', 'table-providers')" target="_blank" rel="noopener">How a provider is registered</a>
+                Rows about the clicked item from a table source of this context: code this deployment
+                registered (for example a call to an internal service), declared in the context form under
+                <strong>Enrichments and data sources</strong>. Runs on the server, opens in the same table
+                window as a query template's table, works on a case canvas, and agents can run it.
+                <a :href="guideUrl('context-menu-actions', 'table-provider')" target="_blank" rel="noopener">More in the guide</a>
               </p>
-              <label>Provider</label>
-              <select v-model="editingProvider" data-testid="menu-action-provider-select">
-                <option value="" disabled>— select a provider —</option>
-                <option v-for="p in tableProviders" :key="p.name" :value="p.name">{{ p.label }}</option>
-                <option v-if="editingProvider && !selectedProvider" :value="editingProvider">
-                  {{ editingProvider }} (not registered on this server)
+              <label>Table source</label>
+              <select v-model="editingSource" data-testid="menu-action-provider-select">
+                <option value="" disabled>— select a table source —</option>
+                <option v-for="t in tableSources" :key="t.name" :value="t.name">{{ t.label }}</option>
+                <option v-if="editingSource && !selectedSource" :value="editingSource">
+                  {{ editingSource }} (not declared in this context)
                 </option>
               </select>
-              <p v-if="editingProvider && !selectedProvider" class="hint warning" data-testid="menu-action-provider-missing">
-                Not registered on this server: the action stays hidden until the deployment registers it.
+              <p v-if="editingSource && !selectedSource" class="hint warning" data-testid="menu-action-provider-missing">
+                This context declares no table source with that name: the action stays hidden until someone
+                with the "Create graph contexts" permission declares it in the context form.
               </p>
-              <template v-else-if="selectedProvider">
+              <p v-else-if="selectedSource && !selectedSource.registered" class="hint warning" data-testid="menu-action-provider-missing">
+                Its provider ({{ selectedSource.provider }}) is not registered on this server: the action stays
+                hidden until the deployment registers it.
+              </p>
+              <template v-else-if="selectedSource">
                 <p class="hint" data-testid="menu-action-provider-description">
-                  {{ selectedProvider.description || 'This provider has no description.' }}
-                  It has a table for: {{ selectedProvider.targets.map((t) => `${t}s`).join(' and ') }}.
+                  {{ selectedSource.description || 'This source has no description.' }}
+                  It has a table for: {{ selectedSource.targets.map((t) => `${t}s`).join(' and ') }}.
+                  <template v-if="selectedSource.columns.length">Returns: {{ selectedSource.columns.join(', ') }}.</template>
                 </p>
                 <p v-if="providerTargetError" class="field-error" data-testid="menu-action-provider-target-error">{{ providerTargetError }}</p>
                 <div class="bindings">
                   <div class="subsection-title">Parameters</div>
                   <div
-                    v-for="p in selectedProvider.params ?? []"
+                    v-for="p in selectedSource.params"
                     :key="p.name"
                     class="provider-param"
                     data-testid="menu-action-provider-param"
@@ -494,9 +502,13 @@
                       {{ p.name }} {{ providerParamError(p) }}
                     </p>
                   </div>
-                  <p v-if="!(selectedProvider.params ?? []).length" class="hint">This provider has no parameters.</p>
-                  <p v-else class="hint">
-                    From the clicked item: {{ placeholderHint }}. Give the provider the item's id this way
+                  <p v-if="selectedSource.locked.length" class="hint" data-testid="menu-action-provider-locked">
+                    Set by the context, not changeable here:
+                    {{ selectedSource.locked.map((l) => `${l.name} = ${l.value || '(none)'}`).join(', ') }}.
+                  </p>
+                  <p v-if="!selectedSource.params.length && !selectedSource.locked.length" class="hint">This source has no parameters.</p>
+                  <p v-if="selectedSource.params.length" class="hint">
+                    From the clicked item: {{ placeholderHint }}. Give the source the item's id this way
                     (for example <code>{node_id}</code>): it receives the parameters, not the item's properties.
                   </p>
                 </div>
@@ -593,7 +605,7 @@ import ContextMenuActionSkillModal from './ContextMenuActionSkillModal.vue';
 import JavaScriptEditor, { type EditorCompletion } from './JavaScriptEditor.vue';
 import { parseCanvasTableSource } from '@/utils/contextMenuActionImport';
 import { useMenuActionTable } from '@/composables/useMenuActionTable';
-import { configuredTableProviders } from '@/utils/enrichmentSources';
+import { actionTableSource, contextTableSources } from '@/utils/enrichmentSources';
 import { paramHint, paramProblem, paramText, paramValues } from '@/utils/providerParams';
 import { guideUrl } from '@/utils/docsLinks';
 import type { ProviderParamInfo } from '@/types/graph';
@@ -671,16 +683,17 @@ const editingBindings = ref<Record<string, string>>({});
 const editingResultMode = ref<'graph' | 'table'>('graph');
 const editingField = ref('');
 const editingMode = ref<'same' | 'has'>('same');
-// run-table-provider (a table from a registered provider)
-const tableProviders = configuredTableProviders();
-const editingProvider = ref('');
-/** Per parameter: left to the table window, bound to the clicked item, or fixed by the action. */
+// run-table-provider (a table from a source the context declares)
+const tableSources = computed(() => contextTableSources(graphStore.currentContext?.enrichment_tables));
+const editingSource = ref('');
+/** Per open parameter: left to the table window, bound to the clicked item, or fixed by the action. */
 const editingProviderHow = ref<Record<string, 'run' | 'bind' | 'fixed'>>({});
 const editingProviderText = ref<Record<string, string>>({});
-const selectedProvider = computed(() => tableProviders.find((p) => p.name === editingProvider.value));
+const selectedSource = computed(() => tableSources.value.find((t) => t.name === editingSource.value));
 
-function loadProvider(config?: { provider: string; paramBindings?: Record<string, string>; params?: Record<string, unknown> }) {
-  editingProvider.value = config?.provider ?? '';
+function loadProvider(config?: { source?: string; provider?: string; paramBindings?: Record<string, string>; params?: Record<string, unknown> }) {
+  // An action older than sources names the provider: open it on the source that uses it.
+  editingSource.value = config ? actionTableSource(config, tableSources.value)?.name ?? config.source ?? config.provider ?? '' : '';
   const how: Record<string, 'run' | 'bind' | 'fixed'> = {};
   const text: Record<string, string> = {};
   for (const [k, v] of Object.entries(config?.paramBindings ?? {})) {
@@ -696,13 +709,13 @@ function loadProvider(config?: { provider: string; paramBindings?: Record<string
   defaultProviderHow();
 }
 
-/** Every declared parameter has a choice (default: left to the table window). */
+/** Every open parameter has a choice (default: left to the table window). */
 function defaultProviderHow() {
-  for (const p of selectedProvider.value?.params ?? []) {
+  for (const p of selectedSource.value?.params ?? []) {
     if (!editingProviderHow.value[p.name]) editingProviderHow.value[p.name] = 'run';
   }
 }
-watch(selectedProvider, defaultProviderHow);
+watch(selectedSource, defaultProviderHow);
 
 function providerParamError(p: ProviderParamInfo): string {
   const how = editingProviderHow.value[p.name] ?? 'run';
@@ -717,7 +730,7 @@ function providerParamError(p: ProviderParamInfo): string {
 }
 
 const providerTargetError = computed(() => {
-  const provider = selectedProvider.value;
+  const provider = selectedSource.value;
   const target = editing.value?.match.target;
   if (!provider || !target) return null;
   const wanted = target === 'both' ? (['node', 'edge'] as const) : [target];
@@ -879,8 +892,9 @@ const formValid = computed(() => {
   if (draft.kind === 'show-table') return !canvasSourceError.value;
   if (draft.kind === 'run-table-provider') {
     // One not registered here is kept as it was (it may be registered later); a new one must exist.
-    if (!selectedProvider.value) return editingProvider.value !== '' && !isNew.value;
-    return !providerTargetError.value && !(selectedProvider.value.params ?? []).some((p) => providerParamError(p));
+    // One not declared (or not registered) here is kept as it was; a new one must be usable.
+    if (!selectedSource.value?.registered) return editingSource.value !== '' && !isNew.value;
+    return !providerTargetError.value && !selectedSource.value.params.some((p) => providerParamError(p));
   }
   return editingTemplateId.value !== '';
 });
@@ -904,8 +918,8 @@ function actionSummary(config: ContextMenuActionConfig): string {
     return `canvas table · ${what}${types} within ${src.hops} hop${src.hops === 1 ? '' : 's'}`;
   }
   if (config.kind === 'run-table-provider') {
-    const provider = tableProviders.find((p) => p.name === config.provider);
-    return provider ? `provider table · ${provider.label}` : `provider table · ${config.provider} (not registered on this server)`;
+    const source = actionTableSource(config, tableSources.value);
+    return source ? `provider table · ${source.label}` : `provider table · ${config.source || config.provider} (not declared in this context)`;
   }
   const name = config.templateName || config.templateId;
   return config.resultMode === 'table' ? `${name} · table` : name;
@@ -1027,8 +1041,9 @@ function buildConfig(): ContextMenuActionConfig | null {
     return { ...base, kind: 'show-table', source, ...(Object.keys(bindings).length ? { paramBindings: bindings } : {}) };
   }
   if (draft.kind === 'run-table-provider') {
-    const provider = selectedProvider.value;
-    const names = provider ? (provider.params ?? []).map((p) => p.name) : Object.keys(editingProviderHow.value);
+    const source = selectedSource.value;
+    // Only what the context opened; a source not usable here keeps what the action had.
+    const names = source?.registered ? source.params.map((p) => p.name) : Object.keys(editingProviderHow.value);
     const pick = (how: 'bind' | 'fixed') =>
       Object.fromEntries(
         names
@@ -1036,11 +1051,11 @@ function buildConfig(): ContextMenuActionConfig | null {
           .map((n) => [n, editingProviderText.value[n].trim()]),
       );
     const bindings = pick('bind');
-    const fixed = paramValues(provider?.params, pick('fixed'));
+    const fixed = paramValues(source?.registered ? source.params : undefined, pick('fixed'));
     return {
       ...base,
       kind: 'run-table-provider',
-      provider: editingProvider.value,
+      source: editingSource.value,
       ...(Object.keys(bindings).length ? { paramBindings: bindings } : {}),
       ...(Object.keys(fixed).length ? { params: fixed } : {}),
     };
@@ -1112,7 +1127,7 @@ function exportActions() {
 /** Parsed view of the Import box; null while it holds nothing. */
 const parsedImport = computed(() => {
   const text = importText.value.trim();
-  return text ? parseImportedActionConfigs(text) : null;
+  return text ? parseImportedActionConfigs(text, tableSources.value) : null;
 });
 
 const importedSource = computed(() =>
@@ -1129,6 +1144,7 @@ const importWarnings = computed(() => {
     nodeProperties: schema.node_properties,
     edgeProperties: schema.edge_properties,
     templateIds: templatesStore.templates.map((t) => t.id),
+    tableSources: tableSources.value,
   });
   return hasActionCompatibilityWarnings(w) ? w : null;
 });
@@ -1149,7 +1165,7 @@ async function pickFile(event: Event) {
 
 function applyImport() {
   importError.value = null;
-  const result = parseImportedActionConfigs(importText.value);
+  const result = parseImportedActionConfigs(importText.value, tableSources.value);
   if (!result.ok) {
     importError.value = result.error;
     return;

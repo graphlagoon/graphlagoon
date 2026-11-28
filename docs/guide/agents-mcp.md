@@ -272,15 +272,19 @@ Four tools read it, and only read:
 | | `describe_context(context_id, tables=[…])` | The same, plus the warehouse's own metadata for up to 10 of those tables: column names, types and comments (the Unity Catalog column comments on Databricks). |
 | Query | `query_context(context_id, query, language)` | Rows of one read-only SQL `SELECT` or Cypher query over the context's tables, with the same rules as the Query Console: no table outside the context, nothing but reads. 200 rows by default, 5,000 at most, so aggregate in the query. |
 | Ask a source | `query_source(context_id, name, ids)` | What one declared source knows about some ids: a lookup's rows per key, or the values an enrichment query or provider would write, per node id. Nothing is written to any graph. |
+| | `query_source(context_id, name, params={…})` | Rows from a **table source** (code the deployment registered, such as a call to an internal service), asked with the parameters the context lets a caller set. |
 
 **What makes a context legible to an agent** is what its author wrote, and none of it is required: the
 context's description (the place to say what each node type is, what each relationship means *and in which
-direction*, and what to be careful with), the description of each property and of each source, and the column
-comments in the warehouse. A source or a column with no description is listed and usable all the same; the
+direction*, and what to be careful with), the description of each property and of each source, the columns a
+provider declares (with type, meaning and unit when its author gave them), and the column comments in the
+warehouse. A source or a column with no description is listed and usable all the same; the
 agent queries it to see. Nothing is hidden for lack of metadata.
 
 **Isolation.** A source is reachable only through a context that declares it, by the name that context gave
-it, by someone who can read that context. Declaring one takes **Create graph contexts**. A provider's
+it, by someone who can read that context: a provider registered on the server but not declared in a context
+does not exist for that context, for people and agents alike (`SOURCE_NOT_DECLARED`). Declaring one takes
+**Create graph contexts**. A provider's
 parameters fixed by the author stay fixed; an agent sets only the ones marked `overridable`. These tools
 add no reach: each is a call a reader of the context can already make from the page (the console query, an
 enrichment's **Run**, a lookup). A provider still owes any authorization narrower than the context

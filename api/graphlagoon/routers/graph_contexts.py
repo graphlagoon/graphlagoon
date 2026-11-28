@@ -18,6 +18,7 @@ from graphlagoon.models.schemas import (
     EnrichmentLookupRequest,
     MenuActionTableRequest,
     MenuActionTableResponse,
+    TableSourceRequest,
     GraphContextCreate,
     GraphContextUpdate,
     GraphContextResponse,
@@ -170,7 +171,7 @@ async def _check_enrichment_tables(request: Request, new, stored, context) -> No
         return
     await require_permission("context.create")(request)
     for spec in changed:
-        refused = spec.get("provider") and provider_problem(spec, context)
+        refused = (spec.get("provider") or spec.get("table_provider")) and provider_problem(spec, context)
         if refused:
             raise HTTPException(
                 status_code=refused.status,
@@ -1072,6 +1073,45 @@ async def run_menu_action_table(
             body.parameters,
             body.row_limit,
             check_match=False,
+            user_token=request.headers.get(ACCESS_TOKEN_HEADER, "").strip() or None,
+        )
+    except menu_action_tables.MenuActionError as e:
+        raise HTTPException(
+            status_code=e.status,
+            detail={"error": {"code": e.code, "message": e.message, "details": {}}},
+        )
+
+
+@router.post(
+    "/{context_id}/sources/{name}/table",
+    response_model=MenuActionTableResponse,
+)
+async def run_table_source(
+    context_id: UUID,
+    name: str,
+    body: TableSourceRequest,
+    request: Request,
+):
+    """Ask a table source of the context (an ``enrichment_tables`` entry with a
+    ``table_provider``) directly, by its name, with no right-click action:
+    ``parameters`` sets the ones the source lets a caller set, ``target`` is the item
+    it is about when its provider reads one. Anyone who can read the context may ask;
+    the answer has the shape of a table action's (``needs_parameters``, ``succeeded``
+    or ``failed``). The agent's ``query_source`` is its twin."""
+    from graphlagoon.middleware.auth import ACCESS_TOKEN_HEADER
+    from graphlagoon.services import menu_action_tables
+    from graphlagoon.utils.context_access import get_context_with_access
+
+    user_email = get_current_user(request)
+    context = await get_context_with_access(context_id, user_email)
+    try:
+        return await menu_action_tables.run_source(
+            context,
+            user_email,
+            name,
+            body.parameters,
+            body.target.model_dump(exclude_none=True) if body.target else None,
+            body.row_limit,
             user_token=request.headers.get(ACCESS_TOKEN_HEADER, "").strip() or None,
         )
     except menu_action_tables.MenuActionError as e:

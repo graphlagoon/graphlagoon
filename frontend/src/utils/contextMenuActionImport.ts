@@ -15,8 +15,7 @@ import type {
 } from '@/types/contextMenuActions';
 import { isKnownActionKind, MAX_NEIGHBORHOOD_HOPS, MAX_PROGRAM_CODE_LENGTH } from '@/types/contextMenuActions';
 import type { PortableSourceSchema } from '@/types/portable';
-import type { TableProviderInfo } from '@/types/graph';
-import { configuredTableProviders } from './enrichmentSources';
+import type { TableSourceInfo } from './enrichmentSources';
 import { paramProblem, paramText, paramValue } from './providerParams';
 import { validateUrlTemplate } from './safeUrl';
 import { extractTemplateProperties, extractTemplateMetrics, parseMetricRef } from './labelFormatter';
@@ -97,8 +96,8 @@ function parseMatch(raw: unknown, index: number): MenuActionMatch | string {
 
 export function parseImportedActionConfigs(
   json: string,
-  /** The table providers registered on this server: a `run-table-provider` action is checked against its own. */
-  tableProviders: TableProviderInfo[] = configuredTableProviders(),
+  /** The table sources this context declares: a `run-table-provider` action is checked against its own. */
+  tableSources: TableSourceInfo[] = [],
 ): ImportResult {
   let parsed: unknown;
   try {
@@ -188,10 +187,11 @@ export function parseImportedActionConfigs(
         ...(parsedSource.type === 'program' ? { paramBindings: stringRecord(raw.paramBindings) } : {}),
       });
     } else if (kind === 'run-table-provider') {
-      if (typeof raw.provider !== 'string' || raw.provider.trim() === '') {
-        return { ok: false, error: `Action ${i + 1}: missing "provider" (a registered table provider's name)` };
+      const named = typeof raw.source === 'string' ? raw.source.trim() : '';
+      const legacy = typeof raw.provider === 'string' ? raw.provider.trim() : '';
+      if (!named && !legacy) {
+        return { ok: false, error: `Action ${i + 1}: missing "source" (the name of a table source of this context)` };
       }
-      const name = raw.provider.trim();
       const bindings = stringRecord(raw.paramBindings);
       const fixed: Record<string, string | number | boolean> = {};
       if (raw.params != null && typeof raw.params === 'object' && !Array.isArray(raw.params)) {
@@ -199,16 +199,22 @@ export function parseImportedActionConfigs(
           if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') fixed[key] = value;
         }
       }
-      // One registered here is checked now; one that is not is a warning (the actions may
-      // come from another server), never a guess.
-      const provider = tableProviders.find((p) => p.name === name);
-      if (provider) {
-        const declared = provider.params ?? [];
+      // One this context declares is checked now; one it does not is a warning (the actions
+      // may come from another context), never a guess. An action older than sources names
+      // the provider: it takes the source that uses it.
+      const source = named ? tableSources.find((t) => t.name === named) : tableSources.find((t) => t.provider === legacy);
+      if (source?.registered) {
         for (const key of [...Object.keys(bindings), ...Object.keys(fixed)]) {
-          const spec = declared.find((p) => p.name === key);
+          const spec = source.params.find((p) => p.name === key);
           if (!spec) {
-            const known = declared.map((p) => p.name).join(', ') || 'none';
-            return { ok: false, error: `Action ${i + 1}: provider "${name}" has no parameter "${key}" (it has: ${known})` };
+            const closed = source.locked.some((l) => l.name === key);
+            const open = source.params.map((p) => p.name).join(', ') || 'none';
+            return {
+              ok: false,
+              error: closed
+                ? `Action ${i + 1}: "${key}" is set by the context for source "${source.name}" and cannot be bound or fixed (open: ${open})`
+                : `Action ${i + 1}: source "${source.name}" has no parameter "${key}" (it has: ${open})`,
+            };
           }
           if (key in fixed) {
             const problem = paramProblem(spec, paramText(fixed[key]));
@@ -217,13 +223,14 @@ export function parseImportedActionConfigs(
           }
         }
         const wanted = base.match.target === 'both' ? ['node', 'edge'] : [base.match.target];
-        const unserved = wanted.find((t) => !provider.targets.includes(t as 'node' | 'edge'));
-        if (unserved) return { ok: false, error: `Action ${i + 1}: provider "${name}" has no table for a ${unserved}` };
+        const unserved = wanted.find((t) => !source.targets.includes(t as 'node' | 'edge'));
+        if (unserved) return { ok: false, error: `Action ${i + 1}: source "${source.name}" has no table for a ${unserved}` };
       }
       configs.push({
         ...base,
         kind: 'run-table-provider',
-        provider: name,
+        source: source?.name ?? named,
+        ...(!source && !named ? { provider: legacy } : {}),
         ...(Object.keys(bindings).length ? { paramBindings: bindings } : {}),
         ...(Object.keys(fixed).length ? { params: fixed } : {}),
       });
@@ -256,7 +263,7 @@ export interface ActionCompatibilityWarnings {
   missingProperties: string[];
   /** `run-query-template` ids that no template of this context has. */
   missingTemplateIds: string[];
-  /** `run-table-provider` names this server has no provider for. */
+  /** `run-table-provider` sources this context does not declare (or whose provider this server lacks). */
   missingProviders: string[];
   /**
    * Metric refs used in templates or `metric:` conditions. Metrics are
@@ -279,11 +286,11 @@ export function actionCompatibilityWarnings(
     nodeProperties: string[];
     edgeProperties: string[];
     templateIds: string[];
-    /** Registered table provider names (default: this server's). */
-    tableProviders?: string[];
+    /** The table sources this context declares. */
+    tableSources?: TableSourceInfo[];
   },
 ): ActionCompatibilityWarnings {
-  const providers = new Set(current.tableProviders ?? configuredTableProviders().map((p) => p.name));
+  const usable = (current.tableSources ?? []).filter((t) => t.registered);
   const missingProviders = new Set<string>();
   const nodeTypes = new Set(current.nodeTypes);
   const edgeTypes = new Set(current.edgeTypes);
@@ -338,7 +345,8 @@ export function actionCompatibilityWarnings(
       }
       for (const binding of Object.values(config.paramBindings ?? {})) checkTemplate(binding);
     } else if (config.kind === 'run-table-provider') {
-      if (!providers.has(config.provider)) missingProviders.add(config.provider);
+      const found = config.source ? usable.some((t) => t.name === config.source) : usable.some((t) => t.provider === config.provider);
+      if (!found) missingProviders.add(config.source || config.provider || '');
       for (const binding of Object.values(config.paramBindings ?? {})) checkTemplate(binding);
     } else {
       if (!templateIds.has(config.templateId)) missingTemplateIds.add(config.templateId);

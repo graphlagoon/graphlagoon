@@ -397,20 +397,25 @@ costs (slow, rate-limited, needs node properties).
 ### Table providers
 
 A table provider returns **rows about one node or edge**: the transactions of this account from the ledger
-service, the tickets of this customer. A context author turns it into a right-click action
-([Table from a provider](./context-menu-actions.md#table-provider)); the rows open in the same window as a
-query template's table, with CSV export and **Add to case**, on a case canvas too, and
-[AI agents](./agents-mcp.md) run it with `run_entity_action`.
+service, the tickets of this customer. Registering one does not make it usable anywhere yet. A context has to
+**declare it as a table source** ([Bring your own data → Declare a table source](./bring-your-own-data.md#declare-a-table-source)),
+which takes the *Create graph contexts* permission; from then on, and only in that context:
+
+- a right-click action shows its rows ([Table from a provider](./context-menu-actions.md#table-provider)), in
+  the same window as a query template's table, with CSV export and **Add to case**, on a case canvas too;
+- [AI agents](./agents-mcp.md#a-context-as-a-data-catalog) find it with `describe_context` and ask it with
+  `query_source`, or run the action with `run_entity_action`.
 
 ```python
 from graphlagoon import (
-    ParamSpec, TableProvider, TableProviderError, TableProviderRequest, TableProviderResult,
+    ColumnSpec, ParamSpec, TableProvider, TableProviderError, TableProviderRequest, TableProviderResult,
     create_mountable_app,
 )
 
 async def tx_history(request: TableProviderRequest) -> TableProviderResult:
-    # request.target: {"type": "node", "id": "acc-1", "node_type": "Account", ...} (no properties)
     # request.params: {"account": "acc-1", "days": 90}; request.row_limit: how many rows to return
+    # request.target: the clicked item, {"type": "node", "id": "acc-1", "node_type": "Account"} (no
+    # properties) — and {} when an agent asks the source directly: read ids from params, not from here.
     try:
         rows = await ledger.transactions(request.params["account"], request.params["days"],
                                          limit=request.row_limit + 1, token=request.user_token)
@@ -433,18 +438,30 @@ app = create_mountable_app(
             ParamSpec("account", required=True, description="Account id"),
             ParamSpec("days", type="int", default=90, min=1, max=365, description="How many days back"),
         ],
+        columns=(                       # optional: what it returns, for whoever reads it
+            "at", "counterparty",
+            ColumnSpec("amount", type="float", description="Amount moved; negative is a debit", unit="BRL"),
+        ),
         timeout_seconds=20,
     )],
 )
 ```
 
-Each parameter's value comes from, in order: a value the action **fixes** (set by whoever configured the
-action; whoever runs it cannot change it), the value typed in the table window, the action's **binding** to
-the clicked item (`{node_id}`, `{prop:x}`), the declared default. A required parameter with no value means
-your code is not called: the window asks for it.
+**Who sets each parameter.** The context's entry gives its own values and lists the parameters a caller may
+set. One it does not list always takes the context's value (or your default): nobody downstream changes it.
+One it lists comes from, in order: a value the action **fixes**, the value typed in the table window or passed
+by an agent, the action's **binding** to the clicked item (`{node_id}`, `{prop:x}`), the context's value, your
+default. A required parameter with no value means your code is not called: the window, or the agent's error,
+asks for it.
 
-**The framework guarantees** that the caller can read the context, that the clicked item's kind is one you
-declared, that `applies_to(context)` (when given) accepted the context, and that `request.params` holds only
+**`columns`** describes what you return to whoever reads it before running anything: plain names, or
+`ColumnSpec(name, type, description, unit)`. It is documentation, shown in the context form, the action editor
+and an agent's `describe_context`; nothing is checked against it and an undeclared column is returned all the
+same. An enrichment provider's `columns` takes `ColumnSpec` too (there, an undeclared key is dropped).
+
+**The framework guarantees** that the context declares a source for your provider and the caller can read
+that context, that the clicked item's kind is one you declared, that `applies_to(context)` (when given)
+accepted the context (when the source is declared and on every call), and that `request.params` holds only
 declared names, typed and inside their bounds. Afterwards it keeps at most `row_limit` rows (more are cut and
 the table says so), turns every cell into text, and cancels the call after `timeout_seconds`
 (`TABLE_PROVIDER_TIMEOUT`). The clicked item's properties are **not** sent: what you need from the item

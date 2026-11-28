@@ -83,6 +83,36 @@ class EnrichmentProviderRequest:
     user_token: Optional[str] = None
 
 
+@dataclass
+class ColumnSpec:
+    """One column a provider returns, described for whoever reads it (a person
+    choosing the provider, an AI agent interpreting a value). Documentation only:
+    nothing is checked against ``type``."""
+
+    name: str
+    #: "str", "int", "float", "bool", "date", "timestamp": what the value is.
+    type: str = ""
+    description: str = ""
+    #: What a number counts: "BRL", "cents", "days", "%".
+    unit: str = ""
+
+
+def column_specs(columns) -> list[ColumnSpec]:
+    """``columns`` (names and/or ``ColumnSpec``) as specs."""
+    return [c if isinstance(c, ColumnSpec) else ColumnSpec(name=str(c)) for c in columns or ()]
+
+
+def column_names(columns) -> list[str]:
+    return [c.name for c in column_specs(columns)]
+
+
+def validate_columns(columns, owner: str) -> None:
+    if isinstance(columns, str) or not all(
+        (isinstance(c, str) and c) or (isinstance(c, ColumnSpec) and c.name) for c in columns
+    ):
+        raise ValueError(f"{owner}: columns must be property names or ColumnSpec instances")
+
+
 Enricher = Callable[[EnrichmentProviderRequest], Awaitable[dict[str, dict[str, Any]]]]
 
 
@@ -96,9 +126,10 @@ class EnrichmentProvider:
     timeout_seconds: float = 30.0
     #: Parameters a context entry (and, where its author allows, a run) may set.
     params: list[ParamSpec] = field(default_factory=list)
-    #: The properties it writes. Declared, they are shown before anyone runs it and
-    #: any other key it returns is dropped; empty means "whatever it returns".
-    columns: tuple[str, ...] = ()
+    #: The properties it writes: names, or ``ColumnSpec`` to also say each one's type,
+    #: meaning and unit. Declared, they are shown before anyone runs it and any other
+    #: key it returns is dropped; empty means "whatever it returns".
+    columns: tuple = ()
     #: Which contexts may use it (asked with the context, on save and on run).
     #: None means every context.
     applies_to: Optional[Callable[[Any], bool]] = None
@@ -111,7 +142,7 @@ class EnrichmentProvider:
             "description": self.description,
             "targets": list(self.targets),
             "params": [p.ui_payload() for p in self.params],
-            "columns": list(self.columns),
+            "columns": column_names(self.columns),
         }
 
 
@@ -138,10 +169,7 @@ def validate_provider(provider: EnrichmentProvider) -> None:
     if not provider.timeout_seconds or provider.timeout_seconds <= 0:
         raise ValueError(f"{owner}: timeout_seconds must be positive")
     validate_param_specs(provider.params, owner=owner, url=False)
-    if isinstance(provider.columns, str) or not all(
-        isinstance(c, str) and c for c in provider.columns
-    ):
-        raise ValueError(f"{owner}: columns must be a list of property names")
+    validate_columns(provider.columns, owner)
     if provider.applies_to is not None and not callable(provider.applies_to):
         raise ValueError(f"{owner}: applies_to must be callable")
 
@@ -175,6 +203,7 @@ def clear_enrichment_provider_registry() -> None:
 
 
 __all__ = [
+    "ColumnSpec",
     "EnrichmentProvider",
     "EnrichmentProviderError",
     "EnrichmentProviderRequest",

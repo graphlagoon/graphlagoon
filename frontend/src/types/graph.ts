@@ -186,6 +186,18 @@ export interface EnrichmentProviderRef {
   runtime_params?: string[];
 }
 
+/**
+ * A table source of the context: a table provider the deployment registered, declared under
+ * the entry's `name`. Right-click actions and agents use it by that name.
+ */
+export interface TableProviderRef {
+  name: string;
+  /** The context's values for the parameters the provider declares. */
+  params?: Record<string, string | number | boolean>;
+  /** The parameters whoever uses the source may set (none when empty). */
+  runtime_params?: string[];
+}
+
 /** One parameter a registered provider declares (the server coerces and bounds the value). */
 export interface ProviderParamInfo {
   name: string;
@@ -216,6 +228,8 @@ export interface TableProviderInfo {
   description: string;
   targets: ('node' | 'edge')[];
   params?: ProviderParamInfo[];
+  /** The columns it returns, when its author declared them. */
+  columns?: string[];
 }
 
 /**
@@ -240,6 +254,8 @@ export interface EnrichmentTable {
   promote?: { node_type: string; id_column: string; edge_type: string } | null;
   query?: EnrichmentQuery | null;
   provider?: EnrichmentProviderRef | null;
+  /** A table source: rows about one item from a registered table provider (no table either). */
+  table_provider?: TableProviderRef | null;
 }
 
 /** POST /graph-contexts/{id}/enrichment/{name}/run: the first row per edge (or node) sent. */

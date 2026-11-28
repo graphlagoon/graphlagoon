@@ -90,10 +90,16 @@ def _provider(recorder, **kw):
 def _action(**overrides):
     return {
         "id": "tx", "label": "Transactions", "enabled": True, "kind": "run-table-provider",
-        "provider": "tx-history", "paramBindings": {"account": "{node_id}"},
+        "source": "tx_history", "paramBindings": {"account": "{node_id}"},
         "match": {"target": "node", "nodeTypes": ["Account"]},
         **overrides,
     }
+
+
+def _source(**ref):
+    """The context's declaration of the provider: every parameter open unless said otherwise."""
+    return {"name": "tx_history", "label": "Transactions (ledger)", "description": "Transactions of an account",
+            "table_provider": {"name": "tx-history", "runtime_params": ["account", "days", "kind"], **ref}}
 
 
 @pytest.fixture
@@ -106,6 +112,7 @@ def env(monkeypatch):
     ctx = store.create_graph_context("Accounts", "e", "n", OWNER)
     store.share_graph_context(ctx.id, READER, "read")
     ctx.context_menu_actions = [_action()]
+    ctx.enrichment_tables = [_source()]
     recorder = _Recorder()
     app = FastAPI()
     app.add_middleware(auth.AuthMiddleware)
@@ -146,7 +153,7 @@ def test_a_reader_gets_rows_for_the_clicked_node(env):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "succeeded" and body["query_type"] == "provider" and body["template_id"] is None
-    assert body["template_name"] == "Transactions (API)"
+    assert body["template_name"] == "Transactions (ledger)"  # the context's name for the source
     assert body["columns"] == ["at", "amount"]
     # Lists and dicts both work; cells are text; a short row is padded, an extra key dropped.
     assert body["rows"] == [["2026-11-01", "120.5"], ["2026-10-30", None], ["2026-10-01", None]]
@@ -220,3 +227,86 @@ def test_refusals(env):
     r = client.post(url, json={"target": NODE}, headers=h(READER))
     assert r.json()["detail"]["error"]["code"] == "MENU_ACTION_NOT_TABLE"
     assert recorder.calls == []
+
+
+# --- The context declares the source -------------------------------------------
+
+
+def test_an_action_runs_only_through_a_source_the_context_declares(env):
+    client, url, recorder, ctx = env
+    register_table_provider(_provider(recorder))
+    ctx.enrichment_tables = []
+    r = client.post(url, json={"target": NODE}, headers=h(READER))
+    assert r.status_code == 400 and r.json()["detail"]["error"]["code"] == "TABLE_SOURCE_NOT_DECLARED"
+    assert recorder.calls == []
+    # An action written before sources existed names the provider: it finds the source that uses it.
+    ctx.enrichment_tables = [_source()]
+    ctx.context_menu_actions = [{**_action(), "source": None, "provider": "tx-history"}]
+    assert client.post(url, json={"target": NODE}, headers=h(READER)).json()["status"] == "succeeded"
+
+
+def test_the_context_sets_values_and_says_which_ones_a_caller_may_change(env):
+    client, url, recorder, ctx = env
+    register_table_provider(_provider(recorder))
+    # Only `account` is open: `days` is the context's 30, `kind` the provider's default.
+    ctx.enrichment_tables = [_source(params={"days": 30}, runtime_params=["account"])]
+    body = client.post(url, json={"target": NODE}, headers=h(READER)).json()
+    assert recorder.calls[-1].params == {"account": "acc-1", "days": 30, "kind": "pix"}
+    assert {p["id"]: p["locked"] for p in body["parameters"]} == {"account": False, "days": True, "kind": True}
+    # Neither the caller nor the action's own fixed value gets past what the context closed.
+    ctx.context_menu_actions = [_action(params={"days": 7, "kind": "ted"})]
+    body = client.post(url, json={"target": NODE, "parameters": {"days": "7"}}, headers=h(READER)).json()
+    assert body["status"] == "succeeded" and recorder.calls[-1].params == {"account": "acc-1", "days": 30, "kind": "pix"}
+
+
+def test_declaring_a_source_takes_context_create_and_a_provider_that_fits(env, monkeypatch):
+    client, url, recorder, ctx = env
+    put = f"/api/graph-contexts/{ctx.id}"
+    ctx.enrichment_tables = []
+    r = client.put(put, json={"enrichment_tables": [_source()]}, headers=h(OWNER))
+    assert r.status_code == 400 and r.json()["detail"]["error"]["code"] == "TABLE_PROVIDER_NOT_REGISTERED"
+    allowed = {"ok": False}
+    register_table_provider(_provider(recorder, applies_to=lambda context: allowed["ok"]))
+    r = client.put(put, json={"enrichment_tables": [_source()]}, headers=h(OWNER))
+    assert r.status_code == 403 and r.json()["detail"]["error"]["code"] == "TABLE_PROVIDER_NOT_ALLOWED"
+    allowed["ok"] = True
+    for ref, said in (({"params": {"days": 0}}, "below the minimum"), ({"runtime_params": ["nope"]}, "declares no parameter"),
+                      ({"runtime_params": ["days"]}, "required")):
+        r = client.put(put, json={"enrichment_tables": [_source(**ref)]}, headers=h(OWNER))
+        assert r.status_code == 400, r.text
+        error = r.json()["detail"]["error"]
+        assert error["code"] == "TABLE_SOURCE_PARAM_INVALID" and said in error["message"]
+    r = client.put(put, json={"enrichment_tables": [_source()]}, headers=h(OWNER))
+    assert r.status_code == 200, r.text
+    assert r.json()["enrichment_tables"][0]["table_provider"]["name"] == "tx-history"
+    # A writer without "Create graph contexts" cannot attach one (it may still edit the rest).
+    from graphlagoon.routers import graph_contexts as router
+
+    async def refuse(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail={"error": {"code": "PERMISSION_DENIED", "message": "no"}})
+
+    monkeypatch.setattr(router, "require_permission", lambda permission: refuse)
+    changed = _source(params={"days": 10})
+    assert client.put(put, json={"enrichment_tables": [changed]}, headers=h(OWNER)).status_code == 403
+    assert client.put(put, json={"description": "x", "enrichment_tables": [_source()]}, headers=h(OWNER)).status_code == 200
+
+
+def test_a_source_is_asked_directly_by_its_name(env):
+    client, url, recorder, ctx = env
+    register_table_provider(_provider(recorder))
+    direct = f"/api/graph-contexts/{ctx.id}/sources/tx_history/table"
+    body = client.post(direct, json={"parameters": {"account": "acc-9", "days": "7"}, "row_limit": 2}, headers=h(READER)).json()
+    assert body["status"] == "succeeded" and body["row_count"] == 2 and body["truncated"] is True
+    request = recorder.calls[-1]
+    assert request.params == {"account": "acc-9", "days": 7, "kind": "pix"} and request.target == {}
+    # With the item it is about, for a provider that reads it.
+    client.post(direct, json={"parameters": {"account": "a"}, "target": {"type": "node", "id": "acc-1"}}, headers=h(READER))
+    assert recorder.calls[-1].target == {"type": "node", "id": "acc-1"}
+    body = client.post(direct, json={}, headers=h(READER)).json()
+    assert body["status"] == "needs_parameters" and body["problems"] == {"account": "needs a value"}
+    body = client.post(direct, json={"parameters": {"account": "a", "bogus": "1"}}, headers=h(READER)).json()
+    assert body["problems"] == {"bogus": "the provider has no such parameter"}
+    r = client.post(f"/api/graph-contexts/{ctx.id}/sources/nope/table", json={}, headers=h(READER))
+    assert r.status_code == 404 and r.json()["detail"]["error"]["code"] == "TABLE_SOURCE_NOT_DECLARED"
+    assert client.post(direct, json={"parameters": {"account": "a"}}, headers=h(STRANGER)).status_code in (403, 404)

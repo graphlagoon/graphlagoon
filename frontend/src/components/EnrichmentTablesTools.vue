@@ -16,8 +16,10 @@ const props = defineProps<{
   skill: Omit<EnrichmentTablesSkillInput, 'currentYaml'>;
   /** The server has enrichment providers registered: offer to attach one. */
   providers?: boolean;
+  /** The server has table providers registered: offer to declare a table source. */
+  tableProviders?: boolean;
 }>();
-const emit = defineEmits<{ import: [EnrichmentTable[]]; add: []; 'add-provider': [] }>();
+const emit = defineEmits<{ import: [EnrichmentTable[]]; add: []; 'add-provider': []; 'add-table-source': [] }>();
 
 const open = ref(false);
 const text = ref('');
@@ -75,6 +77,16 @@ function apply() {
       @click="emit('add-provider')"
     >
       + Attach provider
+    </button>
+    <button
+      v-if="tableProviders"
+      type="button"
+      class="btn btn-sm btn-outline"
+      title="Declare a table source: rows about one node or edge from code the deployment registered, for right-click actions and AI agents"
+      data-testid="enrichment-add-table-source"
+      @click="emit('add-table-source')"
+    >
+      + Attach table source
     </button>
     <button type="button" class="btn btn-sm btn-outline" :aria-expanded="open" data-testid="enrichment-import-toggle" @click="toggle">
       <FileUp :size="14" /> Import YAML

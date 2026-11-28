@@ -112,9 +112,13 @@ onBeforeUnmount(() => {
               class="source-badge"
               :class="table.isCanvas ? 'canvas' : 'warehouse'"
               data-testid="menu-action-table-source"
-              :title="table.isCanvas ? 'Computed from the graph on the canvas: what is loaded, not everything in the warehouse' : 'Run against the warehouse'"
-            >{{ table.isCanvas ? 'Canvas' : 'Warehouse' }}</span>
-            <span v-if="table.templateName.value && !table.isCanvas" class="template-name">Query: {{ table.templateName.value }}</span>
+              :title="table.isCanvas
+                ? 'Computed from the graph on the canvas: what is loaded, not everything in the warehouse'
+                : table.fromProvider.value
+                  ? 'Rows from a table source of this context: code the deployment registered'
+                  : 'Run against the warehouse'"
+            >{{ table.isCanvas ? 'Canvas' : table.fromProvider.value ? 'Provider' : 'Warehouse' }}</span>
+            <span v-if="table.templateName.value && !table.isCanvas" class="template-name">{{ table.fromProvider.value ? 'Source' : 'Query' }}: {{ table.templateName.value }}</span>
             <span v-else-if="table.isCanvas" class="template-name">{{ table.templateName.value }}</span>
             <span v-if="ranWithText && showRows" data-testid="menu-action-table-ran-with">Run with {{ ranWithText }}</span>
           </div>
@@ -150,7 +154,7 @@ onBeforeUnmount(() => {
           @cancel="table.cancel()"
         />
         <div v-else-if="table.error.value" class="state error" data-testid="menu-action-table-error">
-          <strong>The query failed.</strong>
+          <strong>{{ table.fromProvider.value ? 'The source failed.' : 'The query failed.' }}</strong>
           <p>{{ table.error.value }}</p>
           <button class="btn btn-outline" @click="table.run()"><RefreshCw :size="14" /> Try again</button>
         </div>

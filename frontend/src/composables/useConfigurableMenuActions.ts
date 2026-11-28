@@ -20,7 +20,7 @@ import {
   resolveItemMetricValue,
   type FormatOptions,
 } from '@/utils/labelFormatter';
-import type { Node, Edge, QueryTemplate } from '@/types/graph';
+import type { Node, Edge, EnrichmentTable, QueryTemplate } from '@/types/graph';
 import type {
   ContextMenuActionConfig,
   RunQueryTemplateActionConfig,
@@ -28,7 +28,7 @@ import type {
   ShowTableActionConfig,
 } from '@/types/contextMenuActions';
 import { isKnownActionKind, isTableAction } from '@/types/contextMenuActions';
-import { configuredTableProviders } from '@/utils/enrichmentSources';
+import { actionTableSource, contextTableSources } from '@/utils/enrichmentSources';
 
 export const CONFIGURABLE_ACTION_PREFIX = 'configurable-action:';
 
@@ -112,6 +112,8 @@ export interface MenuActionHost {
    * A host that maps nodes but not edges offers no edge table actions.
    */
   sourceEdge?: (edge: Edge) => { id: string; src: string; dst: string } | null | undefined;
+  /** The context's `enrichment_tables`: where its table sources are declared. */
+  enrichmentTables?: () => EnrichmentTable[] | null | undefined;
 }
 
 /**
@@ -182,10 +184,12 @@ export function useConfigurableMenuActions(host?: MenuActionHost) {
     if (config.kind === 'run-query-template' && !isTableAction(config) && !findTemplate(config.templateId)) {
       return false;
     }
-    // A provider this server does not have, or one with no table for this kind of item, offers nothing.
+    // A source the context does not declare, a provider this server does not have, or one
+    // with no table for this kind of item, offers nothing.
     if (config.kind === 'run-table-provider') {
-      const provider = configuredTableProviders().find((p) => p.name === config.provider);
-      if (!provider || !provider.targets.includes(target.type)) return false;
+      const tables = host?.enrichmentTables ? host.enrichmentTables() : graphStore.currentContext?.enrichment_tables;
+      const source = actionTableSource(config, contextTableSources(tables));
+      if (!source?.registered || !source.targets.includes(target.type)) return false;
     }
     return true;
   }

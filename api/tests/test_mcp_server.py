@@ -666,10 +666,18 @@ async def test_an_agent_lists_and_runs_a_table_from_a_registered_provider(env):
     register_table_provider(TableProvider(
         name="tx-history", run=run, label="Transactions (API)", description="Transactions of one account",
         params=[ParamSpec("account", required=True), ParamSpec("days", type="int", default=90, max=365)]))
+    context.enrichment_tables = [
+        {"name": "tx_history", "label": "Transactions (ledger)", "description": "What the context says it is",
+         "table_provider": {"name": "tx-history", "runtime_params": ["account", "days"]}},
+        {"name": "gone", "label": "Gone", "table_provider": {"name": "removed"}},
+    ]
     context.context_menu_actions = [
-        {"id": "api", "label": "Transactions", "enabled": True, "kind": "run-table-provider", "provider": "tx-history",
+        {"id": "api", "label": "Transactions", "enabled": True, "kind": "run-table-provider", "source": "tx_history",
          "paramBindings": {"account": "{node_id}"}, "match": {"target": "node", "nodeTypes": ["Account"]}},
-        {"id": "gone", "label": "Gone", "enabled": True, "kind": "run-table-provider", "provider": "removed",
+        # Its provider is not registered here; and one whose source the context never declared.
+        {"id": "gone", "label": "Gone", "enabled": True, "kind": "run-table-provider", "source": "gone",
+         "match": {"target": "node"}},
+        {"id": "undeclared", "label": "Undeclared", "enabled": True, "kind": "run-table-provider", "source": "nope",
          "match": {"target": "node"}},
     ]
     try:
@@ -681,10 +689,11 @@ async def test_an_agent_lists_and_runs_a_table_from_a_registered_provider(env):
             account = f"c1@{context.id}"
             async with _mcp(app, token) as client:
                 listed = (await _tool(client, "list_entity_actions", investigation_id=cid, uid=account))["actions"]
-                # One whose provider is not registered here offers nothing.
+                # One whose provider is not registered here, or whose source is not declared, offers nothing.
                 assert [a["action_id"] for a in listed] == ["api"]
-                assert (listed[0]["source"], listed[0]["provider"]) == ("provider", "tx-history")
-                assert listed[0]["description"] == "Transactions of one account" and listed[0]["missing"] == {}
+                assert (listed[0]["source"], listed[0]["provider"], listed[0]["table_source"]) == (
+                    "provider", "tx-history", "tx_history")
+                assert listed[0]["description"] == "What the context says it is" and listed[0]["missing"] == {}
                 out = await _tool(client, "run_entity_action", investigation_id=cid, uid=account, action_id="api",
                                   parameters={"days": "30"}, save=True)
                 assert out["status"] == "succeeded" and out["rows"] == [["2026-11-01", "10"], ["2026-11-02", "20"]]

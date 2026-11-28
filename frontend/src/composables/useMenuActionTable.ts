@@ -62,6 +62,8 @@ export function useMenuActionTable(request: MenuActionTableRequest) {
   const parameters = ref<MenuActionParameter[]>([]);
   const problems = ref<Record<string, string>>({});
   const templateName = ref('');
+  /** The rows come from a table source of the context (a registered provider), not from a query. */
+  const fromProvider = ref(false);
   const columns = ref<string[]>([]);
   const rows = ref<(string | null)[][]>([]);
   const truncated = ref(false);
@@ -86,6 +88,7 @@ export function useMenuActionTable(request: MenuActionTableRequest) {
       parameters.value = r.parameters;
       problems.value = r.problems ?? {};
       templateName.value = r.template_name ?? '';
+      fromProvider.value = r.query_type === 'provider';
       // Only the declared parameters: a binding left by a removed one is dropped.
       values.value = Object.fromEntries(r.parameters.map((p) => [p.id, p.value]));
       if (r.status === 'failed') {
@@ -297,6 +300,7 @@ export function useMenuActionTable(request: MenuActionTableRequest) {
     changed,
     ranWith,
     templateName,
+    fromProvider,
     columns,
     rows,
     truncated,
