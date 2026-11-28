@@ -18,6 +18,7 @@ import { useClusterStore } from '@/stores/cluster';
 import { useCaseFilters } from '@/stores/caseFilters';
 import { useItemViewerStore } from '@/stores/itemViewer';
 import { viewerItems } from '@/utils/itemPreview';
+import { renderMarkdown } from '@/utils/markdown';
 import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
 import { useCommunityMenuActions } from '@/composables/useCommunityMenuActions';
 import { useClusterProgramMenuActions } from '@/composables/useClusterProgramMenuActions';
@@ -855,12 +856,14 @@ onUnmounted(() => {
               <div v-if="store.graphLoading || graphStore.loading" class="overlay">{{ graphStore.loadingMessage || 'Loading the case…' }}</div>
               <div v-else-if="store.graphItems.length === 0" class="overlay empty-canvas" data-testid="canvas-empty">
                 <!-- A case of documents (what an agent uploads, mostly): the way in is to read them. -->
-                <template v-if="readingList.length">
-                  <p data-testid="canvas-empty-material">
+                <template v-if="readingList.length || store.brief.text">
+                  <!-- v-html: escape-first renderer only (utils/markdown) -->
+                  <article v-if="store.brief.text" class="front-brief case-markdown" data-testid="front-brief" v-html="renderMarkdown(store.brief.text)"></article>
+                  <p v-if="readingList.length" data-testid="canvas-empty-material">
                     No graph in this case yet: {{ readingList.length }} item{{ readingList.length === 1 ? '' : 's' }} to read<template v-if="toReviewCount">, {{ toReviewCount }} waiting for your review</template>.
                   </p>
                   <span class="overlay-actions">
-                    <button class="btn btn-primary btn-sm" data-testid="canvas-empty-read" @click="startReading">{{ toReviewCount ? 'Start reviewing' : 'Read the material' }}</button>
+                    <button v-if="readingList.length" class="btn btn-primary btn-sm" data-testid="canvas-empty-read" @click="startReading">{{ toReviewCount ? 'Start reviewing' : 'Read the material' }}</button>
                     <button v-if="canEdit" class="btn btn-outline btn-sm" data-testid="canvas-empty-add" @click="showAdd = true"><Plus :size="14" /> Add exploration</button>
                   </span>
                 </template>
@@ -1214,6 +1217,26 @@ onUnmounted(() => {
 .empty-canvas {
   flex-direction: column;
   gap: 10px;
+}
+
+.front-brief {
+  box-sizing: border-box;
+  width: min(720px, 100% - 32px);
+  max-height: 60%;
+  padding: 16px 20px;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--text-color);
+  text-align: left;
+  pointer-events: auto;
+}
+
+.front-brief :deep(p) {
+  max-width: none;
+  margin: 0 0 8px;
+  text-align: left;
 }
 
 .empty-canvas p {

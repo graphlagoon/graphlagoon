@@ -14605,3 +14605,20 @@ Also: the `query.freeform` notes in `admin_registry.py` (a permission the code n
 **Files:** new `.claude/skills/skill_agentic_review/reference/rethink.md`; changed `SKILL.md`.
 **Tests:** none; the mode has not been run yet.
 **Public docs:** No public docs impact. **Admin-area impact:** No admin-area impact.
+
+## [2026-11-28 00:40] - UX: the brief is the case's front page; the dossier stays the record
+
+**Feature:** the brief opens in the reader (**Read**, top of the material list) and comes before the first item when stepping; from v2 on, **Changes since vN** shows the lines the last rewrite added and removed (any text item, not only the brief); *updated* marks a brief rewritten since the last visit; a case without a graph opens on the brief; an empty brief offers **Copy the request for an agent** (a prompt naming the case and the MCP tools).
+**Context:** asked whether an agent-first platform needs a more generic case summary than the dossier, and whether to keep both. The generic summary already existed (`document/brief`, `write_brief`, the playbooks tell agents to write it) but had a 265 × 160 px box, while the dossier had a page.
+**Decisions:**
+1. **Two summaries, two jobs, no third.** The brief is the living account (what this is, what we know now), written by an agent and rewritten; the dossier is the record (what can be shown, what was decided), assembled from confirmed and pinned material, with the brief on top. Nothing new was added to the model.
+2. **The brief stays markdown.** Comparable between versions and quotable in the dossier; an agent that wants a rich page uploads an HTML item and cites it.
+3. **The diff is by line, in the browser** (`utils/lineDiff.ts`, LCS with common head and tail stripped, a size cap): reads the version before through the existing content route (one more audited read, on request).
+4. **No auto-open over a graph.** A case with a graph still opens on the canvas; only a case without one shows the brief in the centre, from the text the page already loads (no extra read).
+5. **A brief is reviewed like any item:** where the case lists `document` in `agent_suggest_kinds`, the reader shows Confirm / Reject for it. The default was not changed.
+**Rejected:** a new "summary" item kind or free HTML in the brief (a second thing to keep in step with the dossier, and not diffable); opening the brief by itself on every case (covers the canvas people came for).
+**Files:** new `frontend/src/utils/{lineDiff,briefPrompt}.ts`; changed `frontend/src/components/investigation/{ItemViewer,CaseItemsPanel}.vue`, `views/InvestigationView.vue`.
+**Tests:** vitest `lineDiff.test.ts`, `ItemViewer.test.ts` (brief before the first item, changes since v1), `CaseItemsPanel.test.ts` (Read, the request for an agent). No e2e added: the mock server has no brief route with versions; checked by hand on the dev stack (two demo cases, a brief with two agent versions).
+**Public docs:** `docs/guide/investigations.md` (The brief and the dossier). **Admin-area impact:** No admin-area impact. **Permission:** none (reads; writing the brief is unchanged).
+**Known limitations:** item titles a brief cites are still text, not links (the reference contract is designed, not built); the diff does not mark changes inside a line.
+

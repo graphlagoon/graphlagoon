@@ -166,6 +166,20 @@ text; images and PDFs display inline; HTML and SVG render in a sandboxed frame
 (see below); a link document opens its address. Every read is audited
 (`investigation.item_read`), so opening an item counts as reading it.
 
+**The brief and the dossier.** A case has two summaries, with different jobs.
+The **brief** answers *what is this case and what do we know now*: one
+markdown text, versioned, usually written by an agent (`write_brief`) and
+rewritten as the work goes on. **Read** on the brief (top of the material
+list) opens it in the reader, wide enough to read; from the second version on,
+**Changes since v*N*** shows the lines the last rewrite added and removed, and
+*updated* marks a brief rewritten since your last visit. A case with no graph
+opens on the brief. With no brief yet, **Copy the request for an agent**
+copies what to paste into Claude Desktop or Claude Code (connected to this
+app's MCP server) to have it written. The **dossier** answers *what can we
+show and what was decided*: nobody writes it, it is assembled from what people
+confirmed and pinned as evidence, the hypotheses, the decisions and the
+journal, with the brief on top.
+
 **Reviewing what an agent uploaded.** The reader is where you judge it: a
 suggested item shows **✓ Confirm** and **✕ Reject** in the reader's header and,
 once judged, the reader moves to the next suggestion; **Next to review (N)**

@@ -276,6 +276,26 @@ describe('CaseItemsPanel', () => {
     expect(queryByTestId('items-new-document')).toBeNull()
   })
 
+  it('the brief: Read opens it in the reader; an empty one offers the request to paste into an agent', async () => {
+    const store = useInvestigationStore()
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    const view = render(CaseItemsPanel, { props: { canEdit: true } })
+    await fireEvent.click(view.getByTestId('brief-read'))
+    expect(useItemViewerStore().target).toEqual({ itemId: 'b1', version: null })
+    expect(view.queryByTestId('brief-ask-agent')).toBeNull()
+
+    store.current = { id: 'inv', title: 'Mule ring', has_write_access: true, status: 'analysis' } as any
+    store.brief = { item: null, text: '' }
+    await flushPromises()
+    await fireEvent.click(view.getByTestId('brief-ask-agent'))
+    expect(writeText).toHaveBeenCalledTimes(1)
+    const prompt = (writeText.mock.calls[0] as unknown as string[])[0]
+    expect(prompt).toContain('write_brief')
+    expect(prompt).toContain('investigation_id inv')
+    expect(prompt).toContain('Mule ring')
+  })
+
   it('rows are keyboard-selectable and icon buttons are labelled', async () => {
     const { getByTestId, emitted } = render(CaseItemsPanel, { props: { canEdit: true } })
     const row = getByTestId('item-t1')
