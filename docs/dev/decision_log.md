@@ -14575,3 +14575,33 @@ Also: the `query.freeform` notes in `admin_registry.py` (a permission the code n
 **Tests:** none automated. Run against the dev stack: `surface` (54 tools, `tools/list` ≈ 64k chars), `call` with a good, an invalid and an unknown tool, `report`, the refusal of a remote URL, and one blind trial with the briefing as written (orient job on Demo · QSA: done in 6 tool calls, answer 380 checked against the seed).
 **Public docs:** No public docs impact. **Admin-area impact:** No admin-area impact.
 **Known limitations:** a trial agent is told not to read the repo, not prevented; `report` counts characters, tokens are an estimate (÷4); the first full run will create `docs/dev/agentic-review.md`.
+
+## [2026-11-27 23:50] - UX: the reader — an agent uploads, a person reviews where the canvas is
+
+**Feature:** picking an item of the material opens it in the reader, docked in the centre column in place of the canvas, with the material list and the inspector still usable. The reader's header carries the review: ✓ Confirm / ✕ Reject for a suggestion (then it moves to the next one), "Next to review (N)", "Pin as evidence". The list marks what others added since the last visit, shows one glyph per content type and hides empty groups. A case without a graph opens on "N items to read, M waiting for your review · Start reviewing" and hides the graph's bars. A reload of the workspace (an item added or re-versioned by anyone, an agent through live sync included) keeps the nodes the person expanded or promoted, and the camera.
+**Context:** the usual session is an agent filling the case through MCP and a person judging the result. Looked at the real screen first (probes at 1440 and 1024 px, a mixed case and a documents-only case; findings 47–49 of `ux-review.md`): reading one upload took three clicks, the large viewer hid the two columns needed to act on it, and a documents-only case was an empty canvas under graph controls.
+**Decisions:**
+1. **Picking is reading.** Reverses decision (2) of the item-preview entry ("preview on demand, because each read is audited"): the audit records a read either way. Cost: one `investigation.item_read` per item opened.
+2. **The reader is the same `ItemViewer`, `docked`** (no Teleport, `role="region"`, absolute over `.center`), not a second component: URL (`?view=`), ← →, versions, full screen and Back keep working. The dialog form remains for other hosts.
+3. **Review actions live in the reader, once.** While the reader shows an item the inspector does not repeat Confirm / Reject / Pin, nor fetch the content a second time (`inReader`, `inViewer`).
+4. **The picked item follows the reader** (← →, a link, "Next to review"), so the inspector always describes what is being read.
+5. **"New" is per browser** (`utils/caseVisit.ts`, the journal's existing `lastVisit` key): someone else's item or version after the last visit, until opened. No server state.
+6. **A graph item is still read on the canvas:** picking one closes the reader; its stored JSON is shown only on request ("Show the data").
+7. **`store.loadWorkspace` prunes instead of resetting:** an expansion or promoted set stays while its source item is in the case; a case change clears both. The view fits the camera only on a new case or an empty canvas.
+**Rejected:** opening the first item by itself on a documents-only case (a read nobody asked for, audited); hiding the row's pin and × until hover (touch and Playwright lose them); changing the default so agent items arrive `suggested` (`write_status`, a policy change for existing agents — the case setting `agent_suggest_kinds` already opts in; left as a product decision).
+**Files:** new `frontend/src/utils/caseVisit.ts`; changed `frontend/src/components/investigation/{ItemViewer,ItemPreview,ItemPreviewBody,SelectionInspector,CaseItemsPanel,CaseTimeline}.vue`, `utils/itemPreview.ts`, `stores/investigation.ts`, `views/InvestigationView.vue`.
+**Tests:** vitest `ItemViewer.test.ts` (docked, confirm → next, pin, read-only), `CaseItemsPanel.test.ts` (reader on pick, new marks, glyphs, no empty group), `ItemPreview.test.ts`, `SelectionInspector.test.ts`, `itemPreview.test.ts`, `stores/__tests__/investigation.test.ts` (reload keeps expansions); e2e `investigations.spec.ts` ("a case of documents an agent uploaded…", and the report / chart tests without the Preview and Expand clicks).
+**Public docs:** `docs/guide/investigations.md` (Reading the material, Reviewing what an agent uploaded). **Admin-area impact:** No admin-area impact. **Permission:** none (confirm, reject and pin are the existing actions behind the existing checks).
+**Known limitations:** the "new" mark does not follow the person to another browser; ids and entity names inside a document are still inert text (the reference contract — items citing entities, "bring to canvas" — is designed, not built); the e2e "follow the money" test picks its node by screen coordinates and failed twice under a loaded multi-spec run (92 % instead of 91 %), passing alone and in two full runs of its spec.
+
+## [2026-11-27 22:10] - Dev tooling: `skill_agentic_review rethink`, from domains and reference tools to a plan
+
+**Feature:** `/skill_agentic_review rethink <domains> [vs <tools>]` (procedure in `reference/rethink.md`) plans what the platform should become for several kinds of investigation with an agent doing most of the work, and writes a plan under `docs/dev/plans/investigation/`.
+**Decisions:**
+1. **Jobs, not feature lists.** Reference tools are read for what an analyst does there on a comparable job and what their data model forces; a capability no domain job uses is dropped however common it is elsewhere.
+2. **A ladder with "build" last:** already possible with existing tools and an uploaded artifact → org data (case type, playbook, template, source) → a missing primitive needed by two or more domains → a domain feature, rejected by default.
+3. **Try before building.** Every capability placed at "build" is first attempted by a blind agent with the probe and an artifact; success moves it up the ladder.
+4. **An artifact covers presentation, not state.** The file names when an uploaded visualization is not enough: the result must be found again, connected to entities, current, confirmed, cited by a decision, or shared across cases.
+**Files:** new `.claude/skills/skill_agentic_review/reference/rethink.md`; changed `SKILL.md`.
+**Tests:** none; the mode has not been run yet.
+**Public docs:** No public docs impact. **Admin-area impact:** No admin-area impact.
