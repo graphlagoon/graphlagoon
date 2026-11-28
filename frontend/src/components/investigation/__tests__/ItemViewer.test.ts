@@ -132,4 +132,41 @@ describe('ItemViewer', () => {
     expect(q('viewer-title')!.textContent).toBe('Item not found')
     expect(api.getInvestigationItemContent).not.toHaveBeenCalled()
   })
+
+  it('docked: no dialog over the page; a suggestion is confirmed here and the reader moves to the next one; a version is pinned', async () => {
+    const store = useInvestigationStore()
+    store.items = ITEMS.map((i) => (i.id === 'note' || i.id === 'tab' ? { ...i, status: 'suggested' } : i)) as any
+    const setStatus = vi.spyOn(store, 'setItemStatus').mockImplementation(async (id: string, status: any) => {
+      store.items = store.items.map((i) => (i.id === id ? { ...i, status } : i)) as any
+    })
+    const pinItem = vi.spyOn(store, 'pinItem').mockResolvedValue({ item_id: 'note', version: 1 } as any)
+    useItemViewerStore().open('tab')
+    const view = render(ItemViewer, { props: { docked: true, canEdit: true } })
+    await flushPromises()
+    const panel = view.getByTestId('item-viewer') // rendered in place, not teleported to the body
+    expect(panel.getAttribute('role')).toBe('region')
+    expect(panel.getAttribute('aria-modal')).toBeNull()
+    expect(view.getByTestId('viewer-status').textContent).toBe('suggested')
+
+    await fireEvent.click(view.getByTestId('viewer-confirm'))
+    await flushPromises()
+    expect(setStatus).toHaveBeenCalledWith('tab', 'confirmed')
+    expect(useItemViewerStore().target).toEqual({ itemId: 'note', version: null }) // the other suggestion
+    await fireEvent.click(view.getByTestId('viewer-pin'))
+    await flushPromises()
+    expect(pinItem).toHaveBeenCalledWith('note', {})
+  })
+
+  it('a confirmed item offers the way to the suggestions left; a reader without write access cannot judge or pin', async () => {
+    const store = useInvestigationStore()
+    store.items = ITEMS.map((i) => (i.id === 'note' ? { ...i, status: 'suggested' } : i)) as any
+    useItemViewerStore().open('rep')
+    const view = render(ItemViewer, { props: { docked: true, canEdit: false } })
+    await flushPromises()
+    expect(view.queryByTestId('viewer-pin')).toBeNull()
+    await fireEvent.click(view.getByTestId('viewer-next-review'))
+    expect(useItemViewerStore().target).toEqual({ itemId: 'note', version: null })
+    await flushPromises()
+    expect(view.queryByTestId('viewer-confirm')).toBeNull()
+  })
 })

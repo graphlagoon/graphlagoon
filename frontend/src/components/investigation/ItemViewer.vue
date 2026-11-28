@@ -1,14 +1,19 @@
 <script setup lang="ts">
 /**
- * One item of the case in (nearly) the whole window: an agent's HTML report or
- * slides, an image, a PDF, a long table or document. Opened from the inspector
- * (Expand), a double click in the material list or a version in the item's
- * details; InvestigationView keeps it in the URL (`?view=<item>&v=<n>`), so a
- * link opens it and Back closes it. ◀ ▶ (or ← →) step through the material in
- * its order, Esc closes, ⤢ asks the browser for full screen.
+ * The reader: one item of the case where the canvas is (`docked`, the case page), with the
+ * material list and the inspector still at hand, or in a dialog over the whole window. An
+ * agent's HTML report or slides, an image, a PDF, a table, a note. Opened by picking the
+ * item in the material list or a version in its details; InvestigationView keeps it in
+ * the URL (`?view=<item>&v=<n>`), so a link opens it and Back closes it. ◀ ▶ (or ← →)
+ * step through the material in its order, Esc goes back to the graph, ⤢ asks the browser
+ * for full screen. Reviewing is done here: a suggestion is confirmed or rejected, a
+ * version pinned as evidence, and "Next to review" moves on.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { ChevronLeft, ChevronRight, Download, Maximize2, Minimize2, X } from 'lucide-vue-next';
+import { ChevronLeft, ChevronRight, Download, Maximize2, Minimize2, Pin, X } from 'lucide-vue-next';
+import { useToast } from '@/composables/useToast';
+import { getErrorMessage } from '@/utils/errorMessage';
+import { markOpened } from '@/utils/caseVisit';
 import { api } from '@/services/api';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useItemViewerStore } from '@/stores/itemViewer';
@@ -19,8 +24,10 @@ import { formatDate } from '@/utils/format';
 import ItemPreviewBody from '@/components/investigation/ItemPreviewBody.vue';
 import type { CaseItem, CaseItemVersion } from '@/types/investigation';
 
+defineProps<{ docked?: boolean; canEdit?: boolean }>();
 const store = useInvestigationStore();
 const viewer = useItemViewerStore();
+const toast = useToast();
 
 const item = computed<CaseItem | null>(() => {
   const id = viewer.target?.itemId;
@@ -95,6 +102,49 @@ const nextItem = computed(() => (position.value >= 0 && position.value < sequenc
 function go(target: CaseItem | null) {
   if (target) viewer.open(target.id);
 }
+watch(() => item.value?.id, (id) => id && markOpened(id), { immediate: true });
+
+// --- review: judge what an agent (or anyone) suggested, pin it, move on ----------------
+const acting = ref(false);
+const latestShown = computed(() => !olderVersion.value);
+const pinned = computed(() => !!item.value?.pinned.some((v) => v.version === versionNumber.value));
+/** The next suggestion after this item, wrapping round; null when this is the only one left. */
+const nextToReview = computed(() => {
+  const list = sequence.value;
+  const at = Math.max(position.value, 0);
+  return [...list.slice(at + 1), ...list.slice(0, at)].find((i) => i.status === 'suggested') ?? null;
+});
+const toReview = computed(() => sequence.value.filter((i) => i.status === 'suggested').length);
+async function act(run: () => Promise<unknown>, failure: string) {
+  if (acting.value) return;
+  acting.value = true;
+  try {
+    await run();
+  } catch (e) {
+    toast.error(getErrorMessage(e, failure));
+  } finally {
+    acting.value = false;
+  }
+}
+function decide(status: 'confirmed' | 'rejected') {
+  const it = item.value;
+  if (!it) return;
+  const next = nextToReview.value;
+  void act(async () => {
+    await store.setItemStatus(it.id, status);
+    if (status === 'rejected') toast.undoable(`Rejected “${it.title}”`, () => void store.reopenItem(it.id));
+    // Judged: on to the next suggestion, or stay on the last one.
+    if (next) viewer.open(next.id);
+  }, status === 'confirmed' ? 'Failed to confirm' : 'Failed to reject');
+}
+function pin() {
+  const it = item.value;
+  if (!it) return;
+  void act(async () => {
+    const v = await store.pinItem(it.id, olderVersion.value ? { version: olderVersion.value } : {});
+    if (v) toast.success(`Pinned as evidence ${store.evidenceLabel(v.item_id ?? it.id, v.version)} (v${v.version})`);
+  }, 'Failed to pin');
+}
 
 // --- window: keys, focus, full screen ------------------------------------------------
 const panel = ref<HTMLElement | null>(null);
@@ -139,13 +189,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="viewer-overlay" data-testid="item-viewer-overlay" @click.self="viewer.close()">
+  <Teleport to="body" :disabled="docked">
+    <div class="viewer-overlay" :class="{ docked }" data-testid="item-viewer-overlay" @click.self="viewer.close()">
       <section
         ref="panel"
         class="viewer"
-        role="dialog"
-        aria-modal="true"
+        :role="docked ? 'region' : 'dialog'"
+        :aria-modal="docked ? undefined : 'true'"
         :aria-label="item?.title ?? 'Item'"
         tabindex="-1"
         data-testid="item-viewer"
@@ -163,7 +213,18 @@ onBeforeUnmount(() => {
           <div class="viewer-title">
             <span v-if="item" class="code">{{ store.shortIds.get(item.id) ?? itemKindLabel(item.kind) }}</span>
             <strong data-testid="viewer-title">{{ item?.title ?? 'Item not found' }}</strong>
-            <span v-if="item" class="chip" :class="item.author_kind" :title="item.author_email">{{ AUTHOR_KIND_LABELS[item.author_kind] }} · {{ item.author_email }}</span>
+            <span v-if="item && !docked" class="chip" :class="item.author_kind" :title="item.author_email">{{ AUTHOR_KIND_LABELS[item.author_kind] }} · {{ item.author_email }}</span>
+            <span v-if="item && item.status !== 'confirmed'" class="chip status" :class="item.status" data-testid="viewer-status">{{ item.status }}</span>
+          </div>
+          <div v-if="item && viewable" class="viewer-review" data-testid="viewer-review">
+            <template v-if="canEdit && item.status === 'suggested' && latestShown">
+              <button class="btn btn-primary btn-sm" :disabled="acting" data-testid="viewer-confirm" @click="decide('confirmed')">✓ Confirm</button>
+              <button class="btn btn-outline btn-sm" :disabled="acting" data-testid="viewer-reject" @click="decide('rejected')">✕ Reject</button>
+            </template>
+            <button v-else-if="nextToReview" class="btn btn-outline btn-sm" :title="`${toReview} suggestion${toReview === 1 ? '' : 's'} to review`" data-testid="viewer-next-review" @click="go(nextToReview)">Next to review ({{ toReview }}) →</button>
+            <button v-if="canEdit" class="btn btn-outline btn-sm" :disabled="acting || pinned" title="Freeze this version as evidence (E1, E2… in the dossier)" data-testid="viewer-pin" @click="pin">
+              <Pin :size="12" /> {{ pinned ? 'Pinned' : 'Pin as evidence' }}
+            </button>
           </div>
           <div class="viewer-actions">
             <select
@@ -186,7 +247,7 @@ onBeforeUnmount(() => {
             <button class="icon-btn" :title="isFullscreen ? 'Exit full screen' : 'Full screen'" :aria-label="isFullscreen ? 'Exit full screen' : 'Full screen'" data-testid="viewer-fullscreen" @click="toggleFullscreen">
               <Minimize2 v-if="isFullscreen" :size="17" /><Maximize2 v-else :size="17" />
             </button>
-            <button class="icon-btn" title="Close (Esc)" aria-label="Close" data-testid="viewer-close" @click="viewer.close()">
+            <button class="icon-btn" :title="docked ? 'Back to the graph (Esc)' : 'Close (Esc)'" :aria-label="docked ? 'Back to the graph' : 'Close'" data-testid="viewer-close" @click="viewer.close()">
               <X :size="18" />
             </button>
           </div>
@@ -228,6 +289,38 @@ onBeforeUnmount(() => {
   outline: none;
 }
 
+.viewer-overlay.docked {
+  position: absolute;
+  z-index: 15;
+  background: var(--color-surface);
+}
+
+.docked .viewer {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.viewer-review {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.chip.status {
+  flex-shrink: 0;
+}
+
+.chip.status.suggested {
+  background: var(--color-warning-subtle, var(--color-border-subtle));
+}
+
+.chip.status.rejected {
+  text-decoration: line-through;
+}
+
 .viewer:fullscreen {
   width: 100vw;
   height: 100vh;
@@ -236,6 +329,7 @@ onBeforeUnmount(() => {
 
 .viewer-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
@@ -254,7 +348,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
+  flex: 1 1 200px;
   min-width: 0;
 }
 

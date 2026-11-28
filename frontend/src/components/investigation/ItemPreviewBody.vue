@@ -266,12 +266,17 @@ function onPointerUp() {
 }
 
 .scroll {
-  max-height: 320px;
+  /* The content is what the card is for: most of the inspector's height, with an edge that says it scrolls. */
+  max-height: min(55vh, 520px);
   overflow: auto;
+  border-bottom: 1px solid var(--color-border-subtle);
+  margin-bottom: 8px;
 }
 
 .full .scroll {
   max-height: none;
+  border-bottom: 0;
+  margin-bottom: 0;
 }
 
 .scroll table {

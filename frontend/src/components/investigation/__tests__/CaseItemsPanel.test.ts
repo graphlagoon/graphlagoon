@@ -5,6 +5,9 @@ import { setActivePinia, createPinia } from 'pinia'
 import CaseItemsPanel from '@/components/investigation/CaseItemsPanel.vue'
 import { useToast } from '@/composables/useToast'
 import { useInvestigationStore } from '@/stores/investigation'
+import { useItemViewerStore } from '@/stores/itemViewer'
+import { useAuthStore } from '@/stores/auth'
+import { beginVisit } from '@/utils/caseVisit'
 
 vi.mock('@/services/api', () => ({
   api: {
@@ -236,6 +239,41 @@ describe('CaseItemsPanel', () => {
     await fireEvent.click(getByTestId('items-hide-rejected'))
     expect(queryByTestId(`item-${rejectedId}`)).toBeNull()
     vi.useRealTimers()
+  })
+
+  it('picking an item opens it in the reader; picking a graph goes back to the canvas', async () => {
+    const { getByTestId, emitted } = render(CaseItemsPanel, { props: { canEdit: true } })
+    const viewer = useItemViewerStore()
+    await fireEvent.click(getByTestId('item-t1'))
+    expect(viewer.target).toEqual({ itemId: 't1', version: null })
+    await fireEvent.click(getByTestId('item-n1'))
+    expect(viewer.target).toEqual({ itemId: 'n1', version: null })
+    await fireEvent.click(getByTestId('item-g1'))
+    expect(viewer.target).toBeNull()
+    expect(emitted('select')).toHaveLength(3)
+  })
+
+  it('marks what others added since the last visit until it is opened, shows one glyph per content type and no empty group', async () => {
+    const store = useInvestigationStore()
+    useAuthStore().email = 'me@x.com'
+    localStorage.setItem('gl:case:inv:lastVisit', '2026-11-01T00:00:00.000Z')
+    beginVisit('inv')
+    store.items = [
+      { ...base, id: 'r1', kind: 'document', subkind: 'upload', title: 'Report', current_version: 1, author_kind: 'agent', latest: { version: 1, content_type: 'text/html', author_kind: 'agent', created_at: '2026-11-20T10:00:00.000Z' } },
+      { ...base, id: 'p1', kind: 'document', subkind: 'upload', title: 'Statement', current_version: 1, latest: { version: 1, content_type: 'application/pdf', created_by: 'me@x.com', created_at: '2026-11-20T10:00:00.000Z' } },
+      { ...base, id: 'o1', kind: 'note', subkind: 'free', title: 'Old', current_version: 1, author_kind: 'agent', latest: { version: 1, author_kind: 'agent', created_at: '2026-10-01T10:00:00.000Z' } },
+    ] as any
+    const { getByTestId, queryByTestId } = render(CaseItemsPanel, { props: { canEdit: true } })
+    expect(getByTestId('item-new-r1')).toBeTruthy()
+    expect(queryByTestId('item-new-p1')).toBeNull() // my own upload
+    expect(queryByTestId('item-new-o1')).toBeNull() // before the last visit
+    expect(getByTestId('items-new-document').textContent).toBe('1 new')
+    expect(getByTestId('item-glyph-r1').dataset.glyph).toBe('page')
+    expect(getByTestId('item-glyph-p1').dataset.glyph).toBe('pdf')
+    expect(queryByTestId('items-group-query')).toBeNull()
+    await fireEvent.click(getByTestId('item-r1'))
+    expect(queryByTestId('item-new-r1')).toBeNull()
+    expect(queryByTestId('items-new-document')).toBeNull()
   })
 
   it('rows are keyboard-selectable and icon buttons are labelled', async () => {

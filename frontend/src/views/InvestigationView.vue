@@ -17,6 +17,7 @@ import { useSimilarityStore } from '@/stores/similarity';
 import { useClusterStore } from '@/stores/cluster';
 import { useCaseFilters } from '@/stores/caseFilters';
 import { useItemViewerStore } from '@/stores/itemViewer';
+import { viewerItems } from '@/utils/itemPreview';
 import { useContextMenu, type ContextMenuTarget } from '@/composables/useContextMenu';
 import { useCommunityMenuActions } from '@/composables/useCommunityMenuActions';
 import { useClusterProgramMenuActions } from '@/composables/useClusterProgramMenuActions';
@@ -435,10 +436,12 @@ let loadedKey: string | null = null;
 async function loadWorkspace() {
   const key = `${store.current?.id}|${store.graphItems.map((s) => `${s.id}:${s.current_version}:${s.mapping?.as ?? ''}`).join(',')}`;
   if (!store.current || key === loadedKey) return;
+  // A reload of the same case (someone added or re-versioned a graph) keeps the person's camera.
+  const keepCamera = loadedKey?.startsWith(`${store.current.id}|`) && store.unified.nodes.length > 0;
   loadedKey = key;
   await store.loadWorkspace();
   applyCanvasStyle();
-  zoomToFitSoon();
+  if (!keepCamera) zoomToFitSoon();
 }
 
 /**
@@ -701,6 +704,27 @@ function selectItem(item: CaseItem | null) {
   if (item && store.analyses.some((a) => a.id === item.id)) activateAnalysis(item);
 }
 
+/** What the reader steps through; the first suggestion (else the first item) is where a review starts. */
+const readingList = computed(() => viewerItems(store.items));
+const toReviewCount = computed(() => readingList.value.filter((i) => i.status === 'suggested').length);
+function startReading() {
+  const first = readingList.value.find((i) => i.status === 'suggested') ?? readingList.value[0];
+  if (first) itemViewer.open(first.id);
+}
+
+// The item the large viewer shows (opened, stepped to with ← →, or from a link) is the picked
+// one: closing the viewer leaves the person on what they were reading.
+watch(
+  () => [itemViewer.target?.itemId, store.items.length] as const,
+  ([id]) => {
+    if (!id || activeItem.value?.id === id) return;
+    const item = store.items.find((i) => i.id === id);
+    if (!item) return;
+    activeItem.value = item;
+    graphStore.clearSelection();
+  },
+);
+
 function togglePanel(panel: CasePanel) {
   panels.value[panel] = !panels.value[panel];
 }
@@ -799,7 +823,9 @@ onUnmounted(() => {
           <CaseItemsPanel v-else :can-edit="canEdit" :active-item="activeItem?.id" @add="showAdd = true" @upload="openUpload()" @select="onMaterialSelect" @collapse="setMaterialCollapsed(true)" />
 
           <div class="center">
-            <div class="strip">
+            <!-- The reader takes the canvas's place: the material and the inspector stay at hand. -->
+            <ItemViewer v-if="itemViewer.target && store.current" docked :can-edit="canEdit" />
+            <div v-if="store.graphItems.length" class="strip">
               <CaseGraphChips
                 :paint-by-group="paintByGroup"
                 @pick="pickCanvasItem"
@@ -821,15 +847,27 @@ onUnmounted(() => {
                 @export="exportPng"
               />
             </div>
-            <CaseFilterChips :can-edit="canEdit" @apply-view="applyView" />
+            <CaseFilterChips v-if="store.graphItems.length" :can-edit="canEdit" @apply-view="applyView" />
             <!-- The groups (communities, program clusters) as chips while the Clusters panel is closed -->
             <GroupLegend v-if="!panels.clusters" variant="chips" class="group-strip" @open-panel="panels.clusters = true" />
             <div v-if="graphStore.queryError" class="error-banner" data-testid="canvas-error">{{ graphStore.queryError.message }}</div>
             <section ref="canvasAreaRef" class="canvas-area" :class="{ fullscreen: isFullscreen }" :style="{ '--canvas-bottom-bar': `${bottomBarHeight}px` }" data-testid="graph-container">
               <div v-if="store.graphLoading || graphStore.loading" class="overlay">{{ graphStore.loadingMessage || 'Loading the case…' }}</div>
               <div v-else-if="store.graphItems.length === 0" class="overlay empty-canvas" data-testid="canvas-empty">
-                <p>Nothing on the canvas yet. Add a recent exploration, start a new one from a context, or upload a file with a mapping.</p>
-                <button v-if="canEdit" class="btn btn-primary btn-sm" data-testid="canvas-empty-add" @click="showAdd = true"><Plus :size="14" /> Add exploration</button>
+                <!-- A case of documents (what an agent uploads, mostly): the way in is to read them. -->
+                <template v-if="readingList.length">
+                  <p data-testid="canvas-empty-material">
+                    No graph in this case yet: {{ readingList.length }} item{{ readingList.length === 1 ? '' : 's' }} to read<template v-if="toReviewCount">, {{ toReviewCount }} waiting for your review</template>.
+                  </p>
+                  <span class="overlay-actions">
+                    <button class="btn btn-primary btn-sm" data-testid="canvas-empty-read" @click="startReading">{{ toReviewCount ? 'Start reviewing' : 'Read the material' }}</button>
+                    <button v-if="canEdit" class="btn btn-outline btn-sm" data-testid="canvas-empty-add" @click="showAdd = true"><Plus :size="14" /> Add exploration</button>
+                  </span>
+                </template>
+                <template v-else>
+                  <p>Nothing on the canvas yet. Add a recent exploration, start a new one from a context, or upload a file with a mapping.</p>
+                  <button v-if="canEdit" class="btn btn-primary btn-sm" data-testid="canvas-empty-add" @click="showAdd = true"><Plus :size="14" /> Add exploration</button>
+                </template>
               </div>
               <div v-else-if="!store.canvasItems.length && store.readableGraphItems.length" class="overlay empty-canvas" data-testid="canvas-none-selected">
                 <p>No graph on the canvas. Pick one in the legend or tick it in the material list.</p>
@@ -901,6 +939,7 @@ onUnmounted(() => {
               </div>
 
               <AnalysisBar
+                v-show="store.graphItems.length > 0"
                 ref="analysisBar"
                 :can-edit="canEdit"
                 :panels="panels"
@@ -975,7 +1014,6 @@ onUnmounted(() => {
     <FileImportWizard v-if="showWizard" :investigation-id="id" :initial-role="wizardRole" @close="showWizard = false" @done="onWizardDone" />
     <CaseSettingsDrawer :open="showSettings" @close="showSettings = false" @share="showShare = true" />
     <ShareDialog :open="showShare" @close="showShare = false" />
-    <ItemViewer v-if="itemViewer.target && store.current" />
     <EntityPage v-if="entityPage" :node="entityPage" :can-edit="canEdit" @close="entityPage = null" @select-item="(i) => { entityPage = null; selectItem(i); }" />
     <ClusterNodeModal @focus-item="focusItem" v-if="selectedClusterId" :cluster-id="selectedClusterId" @close="selectedClusterId = null" />
     <ClusterProgramRunHost />
@@ -1117,6 +1155,7 @@ onUnmounted(() => {
 
 
 .center {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;

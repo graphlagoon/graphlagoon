@@ -19,6 +19,7 @@ vi.mock('@/services/api', () => ({
     createInvestigationAnnotation: vi.fn(),
     deleteInvestigationAnnotation: vi.fn(async () => {}),
     pinInvestigationItem: vi.fn(),
+    postInvestigationEvent: vi.fn(async () => ({})),
     getInvestigationBrief: vi.fn(async () => ({ item: null, text: '' })),
   },
 }))
@@ -98,6 +99,40 @@ describe('investigation store', () => {
     store.annotations[0] = { ...store.annotations[0], status: 'confirmed' }
     expect(store.unified.nodes).toHaveLength(1)
     expect(store.unified.nodes[0].__sources.map((s) => s.sourceId)).toEqual(['g1', 't1'])
+  })
+
+  it('a reload keeps the session expansions and promoted nodes of the sources that remain', async () => {
+    vi.mocked(api.getInvestigation).mockResolvedValue({ id: 'inv1', settings: {}, state: { canvas_items: 'all' } } as any)
+    const g1 = item('g1', { context_id: 'c1' })
+    const g2 = item('g2', { context_id: 'c1' })
+    vi.mocked(api.getInvestigationItems).mockResolvedValue([g1, g2] as any)
+    vi.mocked(api.getGraphContext).mockResolvedValue({ id: 'c1', identity_keys: [] } as any)
+    vi.mocked(api.getInvestigationItemSnapshot).mockImplementation(async (_i, id) => ({
+      item_id: id, title: id, context_id: 'c1', identity_keys: [], edge_semantics: null,
+      snapshot: { nodes: [{ id: `n-${id}`, type: 'Conta', properties: {} }], edges: [] },
+    }) as any)
+    const node = (id: string) => ({ node_id: id, node_type: 'Conta', properties: {} }) as any
+
+    const store = useInvestigationStore()
+    await store.openInvestigation('inv1')
+    await store.loadWorkspace()
+    store.addExpansion({ sourceId: 'g1', contextId: 'c1', nodeId: 'n-g1' }, [node('x1')], [])
+    store.addExpansion({ sourceId: 'g2', contextId: 'c1', nodeId: 'n-g2' }, [node('x2')], [])
+    await store.addDerived({ id: 'derived:g1:Risk', contextId: 'c1', nodes: [node('d1')], edges: [] }, {})
+    const ids = () => store.unified.nodes.map((n) => n.node_id).sort()
+    expect(ids()).toEqual(['d1@c1', 'n-g1@c1', 'n-g2@c1', 'x1@c1', 'x2@c1'])
+
+    // An agent adds a graph: the workspace reloads and nothing the person did is lost.
+    vi.mocked(api.getInvestigationItems).mockResolvedValue([g1, g2, item('g3', { context_id: 'c1' })] as any)
+    await store.fetchItems()
+    await store.loadWorkspace()
+    expect(ids()).toEqual(['d1@c1', 'n-g1@c1', 'n-g2@c1', 'n-g3@c1', 'x1@c1', 'x2@c1'])
+
+    // A source that left takes its expansion and promoted nodes with it.
+    vi.mocked(api.getInvestigationItems).mockResolvedValue([g2] as any)
+    await store.fetchItems()
+    await store.loadWorkspace()
+    expect(ids()).toEqual(['n-g2@c1', 'x2@c1'])
   })
 
   it('enrichment files add properties to the canvas, re-keyed when the mapping changes (BYOD-2)', async () => {

@@ -60,6 +60,27 @@ export function buildPreview(data: ArrayBuffer, contentType: string | null | und
   return textPreview(text);
 }
 
+/**
+ * Items read in the reader, the pane that takes the canvas's place: anything with a
+ * version that is not a graph (a graph is read on the canvas).
+ */
+export function opensInReader(item: Pick<CaseItem, 'kind' | 'current_version'>): boolean {
+  return item.kind !== 'graph' && item.current_version > 0;
+}
+
+/** What a material row shows for its content: one glyph per type, so a PDF, a page and an image tell apart. */
+export function itemGlyph(item: Pick<CaseItem, 'kind' | 'subkind' | 'latest'>): 'table' | 'query' | 'note' | 'image' | 'pdf' | 'page' | 'link' | 'text' {
+  if (item.kind === 'table') return 'table';
+  if (item.kind === 'query') return 'query';
+  if (item.kind === 'note') return 'note';
+  if (item.subkind === 'link') return 'link';
+  const type = (item.latest?.content_type ?? '').toLowerCase().split(';')[0].trim();
+  if (RASTER_IMAGE.test(type)) return 'image';
+  if (type === 'application/pdf') return 'pdf';
+  if (type === 'text/html' || type === 'image/svg+xml') return 'page';
+  return 'text';
+}
+
 /** Items whose versions are rows: what "Use in the dossier" puts in the dossier's tables. */
 export function isTabular(item: Pick<CaseItem, 'kind' | 'query'>): boolean {
   return item.kind === 'table' || (item.kind === 'query' && item.query?.output !== 'graph');

@@ -7,6 +7,7 @@
  * confirm/reject, pin, preview or download any version, use in the dossier).
  */
 import { computed, ref } from 'vue';
+import { useItemViewerStore } from '@/stores/itemViewer';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useGraphStore } from '@/stores/graph';
 import { useAuthStore } from '@/stores/auth';
@@ -47,6 +48,7 @@ const emit = defineEmits<{
 }>();
 
 const store = useInvestigationStore();
+const itemViewer = useItemViewerStore();
 const graph = useGraphStore();
 const auth = useAuthStore();
 const toast = useToast();
@@ -301,6 +303,8 @@ function useAsParam() {
 
 // --- item ------------------------------------------------------------------------
 const item = computed(() => props.activeItem);
+/** The reader shows this item and carries its review actions (confirm, reject, pin): they are not repeated here. */
+const inReader = computed(() => !!item.value && itemViewer.target?.itemId === item.value.id);
 const itemPinned = computed(() => !!item.value && item.value.pinned.some((v) => v.version === item.value!.current_version));
 const inDossier = computed(() => !!item.value?.tags.includes('dossier'));
 const isAnalysis = computed(() => !!item.value && store.analyses.some((a) => a.id === item.value!.id));
@@ -556,7 +560,7 @@ const formatTime = (iso: string) => formatDate(iso);
       <div class="muted">{{ itemKindLabel(item.kind) }} / {{ item.subkind }}<template v-if="item.provenance?.tool"> · {{ item.provenance.tool }}</template></div>
       <h3 class="entity" data-testid="inspector-item-title">{{ item.title }}</h3>
       <p v-if="item.description" class="muted">{{ item.description }}</p>
-      <div v-if="item.status === 'suggested'" class="suggestions" data-testid="item-suggested">
+      <div v-if="item.status === 'suggested' && !inReader" class="suggestions" data-testid="item-suggested">
         <div class="suggestion">
           <span><strong>Suggested</strong><span class="muted"> · by {{ item.author_kind === 'agent' ? 'agent' : item.author_email }}</span></span>
           <span v-if="canEdit" class="row">
@@ -565,6 +569,7 @@ const formatTime = (iso: string) => formatDate(iso);
           </span>
         </div>
       </div>
+      <ItemPreview v-if="item.current_version && store.current" :key="`${item.id}:${item.current_version}`" :item="item" :investigation-id="store.current.id" />
       <dl class="props">
         <dt>Author</dt><dd>{{ item.author_kind === 'agent' ? 'agent · ' : '' }}{{ item.author_email }}</dd>
         <dt>Status</dt><dd>{{ item.status }}</dd>
@@ -584,14 +589,13 @@ const formatTime = (iso: string) => formatDate(iso);
           data-testid="item-open-exploration"
         >Open exploration ↗</RouterLink>
         <button v-if="isAnalysis" class="btn btn-outline btn-sm" data-testid="item-show-analysis" @click="emit('activate', item)">Show analysis</button>
-        <button v-if="canEdit && item.current_version" class="btn btn-outline btn-sm" :disabled="itemPinned" title="Freeze this version as evidence (E1, E2… in the dossier)" data-testid="item-pin" @click="run(async () => { const v = await store.pinItem(item!.id); if (v) toast.success(`Pinned as evidence ${store.evidenceLabel(v.item_id ?? item!.id, v.version)} (v${v.version})`); }, 'Failed to pin')">
+        <button v-if="canEdit && item.current_version && !inReader" class="btn btn-outline btn-sm" :disabled="itemPinned" title="Freeze this version as evidence (E1, E2… in the dossier)" data-testid="item-pin" @click="run(async () => { const v = await store.pinItem(item!.id); if (v) toast.success(`Pinned as evidence ${store.evidenceLabel(v.item_id ?? item!.id, v.version)} (v${v.version})`); }, 'Failed to pin')">
           {{ itemPinned ? '📌 Pinned as evidence' : 'Pin as evidence' }}
         </button>
         <button v-if="canEdit && isTabular(item)" class="btn btn-outline btn-sm" :class="{ on: inDossier }" data-testid="item-dossier" @click="run(() => store.setInDossier(item!, !inDossier), 'Failed to update')">
           {{ inDossier ? '✓ In the dossier' : 'Use in the dossier' }}
         </button>
       </div>
-      <ItemPreview v-if="item.current_version && store.current" :key="`${item.id}:${item.current_version}`" :item="item" :investigation-id="store.current.id" />
       <ItemDetails :key="`details:${item.id}`" :item="item" :can-edit="canEdit" />
     </template>
 
