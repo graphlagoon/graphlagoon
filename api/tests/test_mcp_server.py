@@ -137,6 +137,10 @@ async def test_agent_works_the_case_end_to_end(env):
                     "group", "run_analysis", "changes_since", "get_playbook", "get_case_type"} <= set(tools)
             assert not {n for n in tools if any(w in n.replace("propose_decision", "") for w in ("delete", "share", "decision", "export", "confirm", "reject"))}
             assert tools["add_note"].meta["human_equivalent"] == ["POST /api/investigations/{investigation_id}/items"]
+            # What a client learns on connecting: which tools only read, and how a person reads the work.
+            assert tools["read_item"].annotations.read_only_hint is True and tools["query_context"].annotations.read_only_hint is True
+            assert tools["add_note"].annotations.read_only_hint is False and tools["add_note"].annotations.destructive_hint is False
+            assert tools["edit_exploration"].annotations.destructive_hint is True
             prompts = {p.name for p in (await client.list_prompts()).prompts}
             assert prompts == set(org_library.SEED) | {"playbook"}
             prompt = await client.get_prompt("assemble_brief", {"investigation_id": "c-1"})
@@ -156,7 +160,9 @@ async def test_agent_works_the_case_end_to_end(env):
 
             # 1. brief, as a tool and as a resource
             assert (await _tool(client, "get_brief", investigation_id=cid))["text"] in (None, "")
-            await _tool(client, "write_brief", investigation_id=cid, text="# Brief\nPass-through account")
+            wrote = await _tool(client, "write_brief", investigation_id=cid, text="# Brief\nPass-through account")
+            # The brief's shape is advice, not a gate: the result names the headings left out.
+            assert wrote["version"] == 1 and "What is established" in wrote["missing_headings"] and len(wrote["missing_headings"]) == 5
             assert "Pass-through account" in await _resource(client, f"case://{cid}/brief")
 
             # 2. material and search
@@ -228,6 +234,8 @@ async def test_agent_works_the_case_end_to_end(env):
             assert playbook["seeded"] and "run_analysis" in playbook["body"]
             assert "write_brief" in await _resource(client, "org://playbooks/triage")
             summary = await _tool(client, "get_case", investigation_id=cid)
+            # What waits for a person here: the default when the case sets none (notes and documents enter directly).
+            assert "role" in summary["agent_suggest_kinds"] and "note" not in summary["agent_suggest_kinds"]
             assert summary["suggested"] == 2 and summary["case_type"]["label"] == "General"
 
         # A person sees the real ids; every write shows the agent acting for OWNER.
@@ -447,6 +455,7 @@ async def test_claude_code_works_a_case_from_the_alert_to_the_proposed_decision(
             shot = await _tool(client, "upload_file", investigation_id=cid, filename="kyc-photo.png",
                                content_base64=base64.b64encode(PNG).decode(), content_type="image/png")
             assert (shot["kind"], shot["subkind"], shot["latest"]["content_type"]) == ("document", "upload", "image/png")
+            assert shot["shown_as"].startswith("an image")  # the agent cannot see the screen: it is told
             image = await client.call_tool("read_item", {"investigation_id": cid, "item_id": shot["id"]})
             assert not image.is_error and [c.type for c in image.content] == ["text", "image"]
             assert image.content[1].mime_type == "image/png" and image.content[1].data
@@ -514,6 +523,7 @@ async def test_upload_file_takes_any_bytes_and_import_file_has_a_real_limit(env,
                                 content_base64=base64.b64encode(b"Ana called the mule on Monday").decode())
             assert (notes["kind"], notes["subkind"], notes["author_kind"], notes["title"]) == ("document", "upload", "agent", "notes.txt")
             assert notes["latest"]["content_type"] == "text/plain" and notes["latest"]["size_bytes"] == 29
+            assert notes["shown_as"].startswith("text")
             read = await _tool(client, "read_item", investigation_id=cid, item_id=notes["id"])
             assert "mule on Monday" in read["text"]
             csv = await _tool(client, "upload_file", investigation_id=cid, filename="rows.csv", kind="table",

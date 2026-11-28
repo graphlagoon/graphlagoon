@@ -153,3 +153,18 @@ def test_human_only_routes_reject_an_agent_token_even_for_a_superuser(client):
         )
         assert r.status_code == 403, (method, path, r.status_code, r.text)
         assert r.json()["detail"]["error"]["code"] == "AGENT_FORBIDDEN", (method, path)
+
+
+def test_read_only_tools_are_real_tools_and_cover_every_get_only_tool():
+    """`annotations.readOnlyHint`: a client may let these run without asking each time."""
+    from graphlagoon.mcp.registry import DESTRUCTIVE_TOOLS, READ_ONLY_TOOLS, TOOL_ROUTES
+
+    assert READ_ONLY_TOOLS <= set(TOOL_ROUTES) and DESTRUCTIVE_TOOLS <= set(TOOL_ROUTES)
+    assert not READ_ONLY_TOOLS & DESTRUCTIVE_TOOLS
+    get_only = {t for t, routes in TOOL_ROUTES.items() if all(m == "GET" for m, _ in routes)}
+    assert get_only <= READ_ONLY_TOOLS
+    # Nothing that adds, versions, pins or proposes may be marked as a read.
+    writers = {"write_brief", "add_item", "add_note", "upload_file", "pin_evidence", "annotate", "propose_decision",
+               "run_query", "run_analysis", "run_entity_action", "render_report", "edit_exploration"}
+    assert not writers & READ_ONLY_TOOLS
+
