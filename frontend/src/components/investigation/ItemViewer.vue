@@ -14,6 +14,7 @@ import { ChevronLeft, ChevronRight, Download, Maximize2, Minimize2, Pin, X } fro
 import { useToast } from '@/composables/useToast';
 import { getErrorMessage } from '@/utils/errorMessage';
 import { markOpened } from '@/utils/caseVisit';
+import { diffCounts, lineDiff, type DiffLine } from '@/utils/lineDiff';
 import { api } from '@/services/api';
 import { useInvestigationStore } from '@/stores/investigation';
 import { useItemViewerStore } from '@/stores/itemViewer';
@@ -97,12 +98,45 @@ const linkUrl = computed(() => {
 // --- stepping through the material ---------------------------------------------------
 const sequence = computed(() => viewerItems(store.items));
 const position = computed(() => sequence.value.findIndex((i) => i.id === item.value?.id));
-const prevItem = computed(() => (position.value > 0 ? sequence.value[position.value - 1] : null));
-const nextItem = computed(() => (position.value >= 0 && position.value < sequence.value.length - 1 ? sequence.value[position.value + 1] : null));
+/** The brief is the case's front page: it comes before the first item of the material. */
+const briefItem = computed(() => store.items.find((i) => i.subkind === 'brief' && !i.deleted_at && i.current_version > 0) ?? null);
+const onBrief = computed(() => !!item.value && item.value.id === briefItem.value?.id);
+const prevItem = computed(() => (position.value > 0 ? sequence.value[position.value - 1] : position.value === 0 ? briefItem.value : null));
+const nextItem = computed(() =>
+  onBrief.value ? sequence.value[0] ?? null : position.value >= 0 && position.value < sequence.value.length - 1 ? sequence.value[position.value + 1] : null,
+);
 function go(target: CaseItem | null) {
   if (target) viewer.open(target.id);
 }
 watch(() => item.value?.id, (id) => id && markOpened(id), { immediate: true });
+
+// --- what changed since the version before (a brief or a note an agent rewrote) -------
+const showChanges = ref(false);
+const changes = ref<DiffLine[] | null>(null);
+const changesBusy = ref(false);
+const canDiff = computed(() => preview.value?.kind === 'text' && versionNumber.value > 1);
+const changeCounts = computed(() => (changes.value ? diffCounts(changes.value) : null));
+watch(() => [item.value?.id, versionNumber.value] as const, () => {
+  showChanges.value = false;
+  changes.value = null;
+});
+async function toggleChanges() {
+  showChanges.value = !showChanges.value;
+  const it = item.value;
+  const now = preview.value;
+  if (!showChanges.value || changes.value || !it || now?.kind !== 'text') return;
+  const at = `${it.id}:${versionNumber.value}`;
+  changesBusy.value = true;
+  try {
+    const before = await api.getInvestigationItemContent(investigationId.value, it.id, versionNumber.value - 1);
+    if (at === `${item.value?.id}:${versionNumber.value}`) changes.value = lineDiff(new TextDecoder().decode(before), now.text);
+  } catch (e) {
+    showChanges.value = false;
+    toast.error(getErrorMessage(e, 'Failed to read the version before'));
+  } finally {
+    changesBusy.value = false;
+  }
+}
 
 // --- review: judge what an agent (or anyone) suggested, pin it, move on ----------------
 const acting = ref(false);
@@ -209,6 +243,7 @@ onBeforeUnmount(() => {
               <ChevronRight :size="18" />
             </button>
             <span v-if="position >= 0" class="muted" data-testid="viewer-position">{{ position + 1 }} / {{ sequence.length }}</span>
+            <span v-else-if="onBrief" class="muted" data-testid="viewer-position">Brief</span>
           </div>
           <div class="viewer-title">
             <span v-if="item" class="code">{{ store.shortIds.get(item.id) ?? itemKindLabel(item.kind) }}</span>
@@ -227,6 +262,9 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <div class="viewer-actions">
+            <button v-if="canDiff" class="btn btn-outline btn-sm" :class="{ on: showChanges }" :aria-pressed="showChanges" :disabled="changesBusy" :title="`What changed from v${versionNumber - 1} to v${versionNumber}`" data-testid="viewer-changes" @click="toggleChanges">
+              {{ showChanges ? 'Back to the text' : `Changes since v${versionNumber - 1}` }}
+            </button>
             <select
               v-if="versions.length > 1"
               class="form-control version"
@@ -258,6 +296,17 @@ onBeforeUnmount(() => {
           <p v-else-if="!viewable" class="state">{{ item.kind === 'graph' ? 'Graphs open on the canvas.' : 'This item has no version to show yet.' }}</p>
           <p v-else-if="missingVersion" class="state">Version v{{ olderVersion }} does not exist; pick one above.</p>
           <p v-else-if="tooBig" class="state">This file is too large to open in the browser; download it.</p>
+          <div v-else-if="showChanges && canDiff" class="changes" data-testid="viewer-diff">
+            <p v-if="!changes" class="state">Loading…</p>
+            <template v-else>
+              <p class="muted" data-testid="viewer-diff-summary">
+                <template v-if="changeCounts && (changeCounts.added || changeCounts.removed)">v{{ versionNumber - 1 }} → v{{ versionNumber }}: {{ changeCounts.added }} line{{ changeCounts.added === 1 ? '' : 's' }} added, {{ changeCounts.removed }} removed.</template>
+                <template v-else>Nothing changed from v{{ versionNumber - 1 }} to v{{ versionNumber }}.</template>
+              </p>
+              <pre class="diff"><span v-for="(l, i) in changes" :key="i" class="diff-line" :class="l.op"><span class="mark" aria-hidden="true">{{ l.op === 'add' ? '+' : l.op === 'del' ? '−' : ' ' }}</span><span class="sr-only">{{ l.op === 'add' ? 'added: ' : l.op === 'del' ? 'removed: ' : '' }}</span>{{ l.text || ' ' }}
+</span></pre>
+            </template>
+          </div>
           <ItemPreviewBody v-else-if="preview" :key="`${item.id}:${versionNumber}`" :preview="preview" :item="item" :content-type="contentType" :blob-url="blobUrl" size="full" />
           <p v-else class="state" data-testid="viewer-loading">{{ busy || !ready ? 'Loading…' : 'Could not read this item.' }}</p>
         </div>
@@ -302,6 +351,51 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
+.changes {
+  overflow: auto;
+}
+
+.diff {
+  margin: 8px 0 0;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-line {
+  display: block;
+  padding: 0 8px;
+}
+
+.diff-line .mark {
+  display: inline-block;
+  width: 16px;
+  color: var(--text-muted);
+}
+
+.diff-line.add {
+  background: color-mix(in srgb, var(--color-success) 16%, transparent);
+}
+
+.diff-line.del {
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  text-decoration: line-through;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.btn.on {
+  background: var(--color-primary-subtle);
+}
+
 .viewer-review {
   display: flex;
   align-items: center;
@@ -314,7 +408,7 @@ onBeforeUnmount(() => {
 }
 
 .chip.status.suggested {
-  background: var(--color-warning-subtle, var(--color-border-subtle));
+  background: color-mix(in srgb, var(--color-warning) 22%, transparent);
 }
 
 .chip.status.rejected {

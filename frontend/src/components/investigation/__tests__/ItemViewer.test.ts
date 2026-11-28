@@ -169,4 +169,36 @@ describe('ItemViewer', () => {
     await flushPromises()
     expect(view.queryByTestId('viewer-confirm')).toBeNull()
   })
+
+  it('the brief comes before the first item, and a rewritten text shows what changed since the version before', async () => {
+    const store = useInvestigationStore()
+    const brief = { ...base, id: 'brief', kind: 'document', subkind: 'brief', title: 'Brief', current_version: 2, provenance: {}, latest: { version: 2, content_type: 'text/markdown', size_bytes: 40 } }
+    store.items = [...ITEMS, brief] as any
+    CONTENT['brief:'] = '# Brief\nFour accounts.\nNext: ask the bank.'
+    CONTENT['brief:1'] = '# Brief\nThree accounts.\nNext: ask the bank.'
+    api.getInvestigationItemVersions.mockResolvedValueOnce([
+      { version: 1, content_type: 'text/markdown', size_bytes: 40, created_at: '2026-10-01T10:00:00Z' },
+      { version: 2, content_type: 'text/markdown', size_bytes: 40, created_at: '2026-10-02T10:00:00Z' },
+    ])
+    useItemViewerStore().open('brief')
+    const view = render(ItemViewer, { props: { docked: true, canEdit: true } })
+    await flushPromises()
+    expect(view.getByTestId('viewer-position').textContent).toBe('Brief')
+    expect((view.getByTestId('viewer-prev') as HTMLButtonElement).disabled).toBe(true)
+
+    await fireEvent.click(view.getByTestId('viewer-changes'))
+    await flushPromises()
+    expect(api.getInvestigationItemContent).toHaveBeenCalledWith('inv-1', 'brief', 1)
+    expect(view.getByTestId('viewer-diff-summary').textContent).toContain('1 line added, 1 removed')
+    const diff = view.getByTestId('viewer-diff')
+    expect(diff.querySelector('.diff-line.add')!.textContent).toContain('Four accounts.')
+    expect(diff.querySelector('.diff-line.del')!.textContent).toContain('Three accounts.')
+
+    await fireEvent.click(view.getByTestId('viewer-next'))
+    expect(useItemViewerStore().target?.itemId).toBe('tab') // the first item of the material
+    await flushPromises()
+    await fireEvent.click(view.getByTestId('viewer-prev'))
+    expect(useItemViewerStore().target?.itemId).toBe('brief')
+  })
 })
+

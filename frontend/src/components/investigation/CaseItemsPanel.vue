@@ -13,6 +13,7 @@ import TableOpsDialog, { type TableOp } from './TableOpsDialog.vue';
 import { useInvestigationStore, isGraphItem } from '@/stores/investigation';
 import { itemGlyph, opensInReader } from '@/utils/itemPreview';
 import { isNewItem, markOpened } from '@/utils/caseVisit';
+import { briefPrompt } from '@/utils/briefPrompt';
 import { useItemViewerStore } from '@/stores/itemViewer';
 import { useAuthStore } from '@/stores/auth';
 import { usePermissions } from '@/composables/usePermissions';
@@ -197,6 +198,24 @@ function startBrief() {
   editingBrief.value = true;
 }
 
+/** The brief in the reader: the case's front page, wide enough to read. */
+function readBrief() {
+  const item = store.brief.item;
+  if (!item) return;
+  markOpened(item.id);
+  emit('select', item);
+  viewer.open(item.id);
+}
+async function copyBriefPrompt() {
+  if (!store.current) return;
+  try {
+    await navigator.clipboard.writeText(briefPrompt(store.current));
+    toast.success('Copied: paste it into your agent (Claude Desktop, Claude Code)');
+  } catch {
+    toast.error('Could not copy: the clipboard is not available here');
+  }
+}
+
 function saveBrief() {
   run('brief', async () => {
     await store.saveBrief(briefDraft.value);
@@ -298,7 +317,9 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
           <Bot v-if="store.brief.item.latest?.author_kind === 'agent'" :size="11" /><User v-else :size="11" />
           v{{ store.brief.item.current_version }}
         </span>
+        <span v-if="store.brief.item && isNew(store.brief.item)" class="new-count" title="Rewritten since your last visit" data-testid="brief-new">updated</span>
         <span class="spacer"></span>
+        <button v-if="store.brief.item && store.brief.text && !editingBrief" class="link-btn" title="Read the brief where the canvas is; from v2 on it shows what changed" data-testid="brief-read" @click="readBrief">Read</button>
         <button v-if="canEdit && !editingBrief && !store.briefError" class="link-btn" data-testid="brief-edit" @click="startBrief">
           {{ store.brief.text ? 'Edit' : 'Write' }}
         </button>
@@ -315,7 +336,10 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
       </p>
       <!-- v-html: escape-first renderer only (utils/markdown) -->
       <div v-else-if="store.brief.text" class="brief-text case-markdown" data-testid="brief-text" v-html="renderMarkdown(store.brief.text)"></div>
-      <p v-else class="muted">No brief yet.</p>
+      <template v-else>
+        <p class="muted">No brief yet. An agent usually writes it.</p>
+        <button v-if="store.current" class="link-btn" title="Copies what to paste into Claude Desktop or Claude Code, connected to this app's MCP server" data-testid="brief-ask-agent" @click="copyBriefPrompt">Copy the request for an agent</button>
+      </template>
     </section>
 
     <div class="search-row">
@@ -680,6 +704,10 @@ const timeAgo = (iso?: string | null) => formatRelative(iso);
   height: 7px;
   border-radius: 50%;
   background: var(--color-primary);
+}
+
+.brief-head .new-count {
+  margin-left: 0;
 }
 
 .new-count {
