@@ -1516,13 +1516,15 @@ async function submit() {
                 </button>
               </div>
               <div class="form-group">
-                <label>What it adds and when to use it <span class="muted">(optional; people and AI agents read it before running it)</span></label>
+                <label>{{ row.provider_kind === 'table' ? 'What it returns and when to ask it' : 'What it adds and when to use it' }} <span class="muted">(optional; people and AI agents read it before running it)</span></label>
                 <textarea
                   v-model="row.description"
                   class="form-control enrichment-description"
                   rows="1"
                   maxlength="1000"
-                  placeholder="KYC tier and score per account. Run before grouping by risk."
+                  :placeholder="row.provider_kind === 'table'
+                    ? 'Monthly totals per account from the ledger API. Ask it for one account at a time.'
+                    : 'KYC tier and score per account. Run before grouping by risk.'"
                   data-testid="enrichment-description"
                 ></textarea>
               </div>
@@ -1627,13 +1629,15 @@ async function submit() {
               </button>
             </div>
               <div class="form-group">
-                <label>What it adds and when to use it <span class="muted">(optional; people and AI agents read it before running it)</span></label>
+                <label>{{ row.provider_kind === 'table' ? 'What it returns and when to ask it' : 'What it adds and when to use it' }} <span class="muted">(optional; people and AI agents read it before running it)</span></label>
                 <textarea
                   v-model="row.description"
                   class="form-control enrichment-description"
                   rows="1"
                   maxlength="1000"
-                  placeholder="KYC tier and score per account. Run before grouping by risk."
+                  :placeholder="row.provider_kind === 'table'
+                    ? 'Monthly totals per account from the ledger API. Ask it for one account at a time.'
+                    : 'KYC tier and score per account. Run before grouping by risk.'"
                   data-testid="enrichment-description"
                 ></textarea>
               </div>

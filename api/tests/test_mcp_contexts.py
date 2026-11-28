@@ -259,6 +259,24 @@ async def test_the_warehouse_describes_the_tables_of_the_context_only(env):
 
 
 @pytest.mark.asyncio
+async def test_a_table_the_allowed_sources_no_longer_reach_is_not_described(env, monkeypatch):
+    """An admin narrowed the allowed sources after the context authorized a table: its
+    columns are refused like its rows, not read with the app's warehouse client."""
+    from graphlagoon.services import enrichment
+
+    app, context, *_ = env
+    real = enrichment.source_problem
+    monkeypatch.setattr(enrichment, "source_problem",
+                        lambda table, ctx: "outside the allowed sources" if table == "main.graphs.devices" else real(table, ctx))
+    async with mcp_lifespan(app), _rest(app) as rest:
+        async with _mcp(app, await _token(rest)) as client:
+            cat = await _tool(client, "describe_context", context_id=str(context.id))
+            assert next(t for t in cat["tables"] if t["table"] == "main.graphs.devices")["sql_queryable"] is False
+            assert "TABLE_NOT_ALLOWED" in await _error(
+                client, "describe_context", context_id=str(context.id), tables=["main.graphs.devices"])
+
+
+@pytest.mark.asyncio
 async def test_a_query_stays_inside_the_context_and_is_read_only(env):
     app, context, *_, ds, _calls = env
     cid = str(context.id)

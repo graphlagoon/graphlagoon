@@ -122,6 +122,13 @@ def sources(context) -> list[dict]:
                 "ids": "items [{edge_id, src, dst, relationship_type}]" if edges else "node ids",
                 "returns": "one row of values per id",
             }
+            if run.get("kind") == "query" and not edges:
+                # Asked without a graph, the query's graph_nodes are the ids given and
+                # graph_edges is empty: a query that joins the edges matches nothing.
+                ask["run"]["note"] = (
+                    "graph_nodes holds only the ids you give and graph_edges is empty; "
+                    "if the query needs edges, read them with query_context instead"
+                )
         out.append({**entry, "how": list(ask), "ask": ask})
     return out
 
@@ -182,9 +189,20 @@ async def table_columns(warehouse, context, wanted: list[str]) -> list[dict]:
     context's is refused; one the warehouse cannot describe comes back unreachable."""
     from graphlagoon.services.schema_drift import parse_qualified_table
 
-    known = {t["table"] for t in tables(context)}
+    listed = tables(context)
+    known = {t["table"] for t in listed}
+    # An authorized table the allowed sources no longer reach is not described either:
+    # its columns are as much the warehouse's as its rows.
+    closed = {t["table"] for t in listed if not t["sql_queryable"]}
     if len(wanted) > MAX_DESCRIBED_TABLES:
         raise CatalogError(400, "TOO_MANY_TABLES", f"At most {MAX_DESCRIBED_TABLES} tables per call")
+    blocked = [t for t in wanted if t in closed]
+    if blocked:
+        raise CatalogError(
+            403,
+            "TABLE_NOT_ALLOWED",
+            f"Outside the allowed sources now: {', '.join(blocked)}. Ask an admin, or use the context's other tables",
+        )
     outside = [t for t in wanted if t not in known]
     if outside:
         raise CatalogError(

@@ -103,6 +103,27 @@ describe('ContextMenuActionsModal — table from a provider', () => {
     expect(el('menu-action-provider-how-kind')).toBeNull();
   });
 
+  it('keeps an old action that names a provider in its old shape while no source uses it', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { table_providers: PROVIDERS as never };
+    useGraphStore().currentContext = {
+      id: 'ctx-1', title: 'Accounts', has_write_access: true, node_types: ['Account'],
+      relationship_types: [], node_properties: [], edge_properties: [], enrichment_tables: [],
+    } as any;
+    const store = useContextMenuActionsStore();
+    store.hydrateFromContext([
+      { id: 'a1', label: 'Old', enabled: true, match: { target: 'node' }, kind: 'run-table-provider', provider: 'tx-history' } as any,
+    ]);
+    render(ContextMenuActionsModal, { props: { modelValue: true } });
+    await nextTick();
+    const edit = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Edit')!;
+    await fireEvent.click(edit);
+    await nextTick();
+    await fireEvent.update(el('menu-action-label')!, 'Old, renamed');
+    await fireEvent.click(el('menu-action-save')!);
+    // Saved with source "tx-history" it would never find a source declared later under another name.
+    expect(store.actionConfigs[0]).toMatchObject({ kind: 'run-table-provider', source: '', provider: 'tx-history' });
+  });
+
   it('says when the provider has no table for what the action applies to', async () => {
     window.__GRAPH_LAGOON_CONFIG__ = { table_providers: PROVIDERS as never };
     await open();

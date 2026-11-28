@@ -690,10 +690,15 @@ const editingSource = ref('');
 const editingProviderHow = ref<Record<string, 'run' | 'bind' | 'fixed'>>({});
 const editingProviderText = ref<Record<string, string>>({});
 const selectedSource = computed(() => tableSources.value.find((t) => t.name === editingSource.value));
+/** The provider an old action named, while no declared source uses it. */
+const editingLegacyProvider = ref('');
 
 function loadProvider(config?: { source?: string; provider?: string; paramBindings?: Record<string, string>; params?: Record<string, unknown> }) {
   // An action older than sources names the provider: open it on the source that uses it.
   editingSource.value = config ? actionTableSource(config, tableSources.value)?.name ?? config.source ?? config.provider ?? '' : '';
+  // No source uses that provider yet: keep the action in its old shape, so it finds
+  // the source someone declares later instead of a source named after the provider.
+  editingLegacyProvider.value = config && !config.source && config.provider && !selectedSource.value ? config.provider : '';
   const how: Record<string, 'run' | 'bind' | 'fixed'> = {};
   const text: Record<string, string> = {};
   for (const [k, v] of Object.entries(config?.paramBindings ?? {})) {
@@ -1055,7 +1060,9 @@ function buildConfig(): ContextMenuActionConfig | null {
     return {
       ...base,
       kind: 'run-table-provider',
-      source: editingSource.value,
+      ...(editingLegacyProvider.value && editingSource.value === editingLegacyProvider.value && !source
+        ? { source: '', provider: editingLegacyProvider.value }
+        : { source: editingSource.value }),
       ...(Object.keys(bindings).length ? { paramBindings: bindings } : {}),
       ...(Object.keys(fixed).length ? { params: fixed } : {}),
     };

@@ -524,7 +524,9 @@ def resolve_provider_params(provider, ref: dict, given: Optional[dict]) -> dict:
             + (f"; a run may set: {', '.join(sorted(allowed))}" if allowed else ""),
         )
     try:
-        return coerce_values(provider.params, {**(ref.get("params") or {}), **given})
+        # An empty context value is unset, as for a table source: the default runs.
+        fixed = {k: v for k, v in (ref.get("params") or {}).items() if v is not None and v != ""}
+        return coerce_values(provider.params, {**fixed, **given})
     except ParamError as e:
         raise EnrichmentError(400, "ENRICHMENT_PARAM_INVALID", e.message)
 
@@ -675,6 +677,13 @@ def column_payload(columns) -> list[dict]:
     ]
 
 
+def _context_value(fixed: dict, spec) -> Any:
+    """The value a run uses when nobody sets it: an empty context value counts as
+    unset, as the binders read it, so what an agent is told is what runs."""
+    value = fixed.get(spec.name)
+    return spec.default if value is None or value == "" else value
+
+
 def describe_tables(context) -> list[dict]:
     """Each enrichment of ``context`` as an agent needs it to choose one: what it is,
     the author's description (a provider's registered one when the entry has none),
@@ -717,7 +726,7 @@ def describe_tables(context) -> list[dict]:
                 run["params"] = [
                     {
                         **p.ui_payload(),
-                        "value": fixed.get(p.name, p.default),
+                        "value": _context_value(fixed, p),
                         "overridable": p.name in runtime,
                     }
                     for p in (provider.params if provider else [])
@@ -743,7 +752,7 @@ def describe_tables(context) -> list[dict]:
                 "targets": list(table_provider.targets) if table_provider else [],
                 "columns": column_payload(table_provider.columns) if table_provider else [],
                 "params": [
-                    {**p.ui_payload(), "value": fixed.get(p.name, p.default), "overridable": p.name in runtime}
+                    {**p.ui_payload(), "value": _context_value(fixed, p), "overridable": p.name in runtime}
                     for p in (table_provider.params if table_provider else [])
                 ],
             }

@@ -207,17 +207,17 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/graph-contexts/{context_id}/query"): (
         "read-only query execution (SELECT-only validator, BEGIN…END scripts "
-        "rejected, gated by query.freeform)"
+        "rejected, limited to the context's tables by enforce_query_scope)"
     ),
     (
         "POST",
         "/api/graph-contexts/{context_id}/query/async",
     ): (
         "read-only query execution (SELECT-only validator, BEGIN…END scripts "
-        "rejected, gated by query.freeform)"
+        "rejected, limited to the context's tables by enforce_query_scope)"
     ),
     ("POST", "/api/graph-contexts/{context_id}/query/table"): (
-        "read-only query (gated by query.freeform)"
+        "read-only query, limited to the context's tables by enforce_query_scope"
     ),
     ("POST", "/api/graph-contexts/{context_id}/menu-actions/{action_id}/table"): (
         "read-only query of a saved template, scoped like query/table; an agent's run is "
