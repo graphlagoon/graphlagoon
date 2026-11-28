@@ -18,6 +18,7 @@ from graphlagoon.services.enrichment_providers import (
 )
 
 from graphlagoon.services.table_providers import (
+    ColumnSpec,
     TableProvider,
     TableProviderRequest,
     TableProviderResult,
@@ -58,15 +59,19 @@ def demo_enrichment_providers() -> list[EnrichmentProvider]:
                     description="How many risk tiers kyc_tier uses",
                 )
             ],
-            columns=("kyc_tier", "kyc_score"),
+            columns=(
+                ColumnSpec("kyc_tier", description="Risk tier of the scheme asked for; 'high' is the riskiest"),
+                ColumnSpec("kyc_score", type="float", description="0 (no risk) to 1"),
+            ),
         )
     ]
 
 
 async def _activity(request: TableProviderRequest) -> TableProviderResult:
-    """Made-up monthly activity of one node, derived from its id."""
-    months, channel = request.params["months"], request.params["channel"]
-    ident = str(request.target["id"])
+    """Made-up monthly activity of one node, derived from its id. The id is a parameter
+    (the action binds it to the clicked node), so the source also answers when asked
+    directly, with no clicked item."""
+    months, channel, ident = request.params["months"], request.params["channel"], request.params["node"]
     rows = []
     for back in range(months):
         for name in CHANNELS if channel == "all" else (channel,):
@@ -91,10 +96,17 @@ def demo_table_providers() -> list[TableProvider]:
             "and channel; cheap to run.",
             timeout_seconds=10.0,
             params=[
+                ParamSpec("node", required=True, description="Id of the node the activity is about"),
                 ParamSpec("months", type="int", default=6, min=1, max=24,
                           description="How many months back"),
                 ParamSpec("channel", choices=["all", *CHANNELS], default="all",
                           description="One channel, or all of them"),
             ],
+            columns=(
+                ColumnSpec("month", description="Months back from now: 'month -0' is the current one"),
+                ColumnSpec("channel", description="pix, card or wire"),
+                ColumnSpec("transactions", type="int", description="Transactions in the month on that channel"),
+                ColumnSpec("amount", type="float", description="Total moved", unit="BRL"),
+            ),
         )
     ]

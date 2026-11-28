@@ -394,7 +394,7 @@ async def test_an_agent_reads_what_each_enrichment_of_a_context_does(env, provid
                 "kind": "provider", "target": "nodes", "mode": "manual", "overwrite": False,
                 "node_props": False, "edge_props": False,
                 "provider": {"name": "kyc", "label": "KYC", "registered": True},
-                "columns": ["kyc_tier", "titular"],
+                "columns": [{"name": "kyc_tier"}, {"name": "titular"}],
                 "params": [{"name": "as_of_days", "type": "int", "required": False, "default": 30, "description": "",
                             "choices": None, "min": 1, "max": 365, "value": 30, "overridable": False}],
             }

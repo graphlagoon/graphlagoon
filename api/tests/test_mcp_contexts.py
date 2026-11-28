@@ -43,6 +43,10 @@ from graphlagoon.services.enrichment_providers import (  # noqa: E402
     EnrichmentProvider, EnrichmentProviderError, ParamSpec, clear_enrichment_provider_registry,
     register_enrichment_provider,
 )
+from graphlagoon.services.table_providers import (  # noqa: E402
+    ColumnSpec, TableProvider, TableProviderError, TableProviderResult, clear_table_provider_registry,
+    register_table_provider,
+)
 from tests.test_enrichment import DEVICES, _Warehouse  # noqa: E402
 from tests.test_mcp_explorations import SNAP, _Files  # noqa: E402
 from tests.test_mcp_server import OWNER, _mcp, _rest, _tool  # noqa: E402
@@ -121,6 +125,20 @@ def env(monkeypatch, tmp_path):
         params=[ParamSpec("as_of_days", type="int", default=30, min=1, max=365)], columns=("kyc_tier",)))
     register_enrichment_provider(EnrichmentProvider(name="weight", enrich=weight, targets=("edges",)))
 
+    async def ledger(request):
+        calls.append(request)
+        if request.params["account"] == "boom":
+            raise TableProviderError("The ledger is down")
+        return TableProviderResult(columns=["at", "amount"],
+                                   rows=[[f"2026-11-0{i}", i * 10] for i in range(1, request.params["days"] + 1)])
+
+    clear_table_provider_registry()
+    register_table_provider(TableProvider(
+        name="ledger", run=ledger, label="Ledger", description="Transactions of one account",
+        params=[ParamSpec("account", required=True), ParamSpec("days", type="int", default=3, min=1, max=9),
+                ParamSpec("tenant", default="br")],
+        columns=("at", ColumnSpec("amount", type="float", description="Amount moved", unit="BRL"))))
+
     store = InMemoryStore.get_instance()
     context = store.create_graph_context(
         "Pix", "main.graphs.e", "main.graphs.n", OWNER,
@@ -132,6 +150,8 @@ def env(monkeypatch, tmp_path):
             {"name": "only_table", "label": "Only a table", "table": "main.graphs.extra"},
             _provider_entry("kyc", "kyc", "nodes", params={"as_of_days": 90}, runtime_params=["as_of_days"]),
             _provider_entry("weight", "weight", "edges"),
+            {"name": "tx_history", "label": "Transactions",
+             "table_provider": {"name": "ledger", "params": {"tenant": "pt"}, "runtime_params": ["account", "days"]}},
         ],
     )
     other = store.create_graph_context("Other", "main.graphs.e2", "main.graphs.n2", OWNER)
@@ -145,6 +165,7 @@ def env(monkeypatch, tmp_path):
     mount_mcp(app)
     yield app, context, other, foreign, exploration, ds, calls
     clear_enrichment_provider_registry()
+    clear_table_provider_registry()
     InMemoryStore.reset()
     get_settings.cache_clear()
 
@@ -170,7 +191,7 @@ async def test_from_nothing_to_an_answer_in_four_calls(env):
             # Readable ones only, newest first; a stranger's context is not there.
             assert {c["title"] for c in listed} == {"Pix", "Other"}
             pix = next(c for c in listed if c["title"] == "Pix")
-            assert pix["sources"] == ["devices", "kyc", "weight"] and pix["description"].startswith("Accounts")
+            assert pix["sources"] == ["devices", "kyc", "weight", "tx_history"] and pix["description"].startswith("Accounts")
             assert [c["title"] for c in (await _tool(client, "list_contexts", q="pix transfers"))["contexts"]] == ["Pix"]
 
             cat = await _tool(client, "describe_context", context_id=pix["id"])
@@ -186,11 +207,11 @@ async def test_from_nothing_to_an_answer_in_four_calls(env):
             assert "columns" not in cat["tables"][0]
             by_name = {s["name"]: s for s in cat["sources"]}
             # An entry that only authorizes its table is a table, not a source.
-            assert list(by_name) == ["devices", "kyc", "weight"]
+            assert list(by_name) == ["devices", "kyc", "weight", "tx_history"]
             assert by_name["devices"]["how"] == ["lookup"] and "Conta" in by_name["devices"]["ask"]["lookup"]["ids"]
             kyc = by_name["kyc"]
             assert kyc["how"] == ["run"] and kyc["ask"]["run"]["ids"] == "node ids"
-            assert kyc["description"] == "What kyc adds" and kyc["run"]["columns"] == ["kyc_tier"]
+            assert kyc["description"] == "What kyc adds" and kyc["run"]["columns"] == [{"name": "kyc_tier"}]
             assert kyc["run"]["params"][0]["value"] == 90 and kyc["run"]["params"][0]["overridable"] is True
             assert "edge_id" in by_name["weight"]["ask"]["run"]["ids"]
 
@@ -232,7 +253,7 @@ async def test_the_warehouse_describes_the_tables_of_the_context_only(env):
         # The same catalog over REST, for a reader; not for a stranger.
         r = await rest.get(f"/api/graph-contexts/{cid}/catalog", params={"tables": ["main.graphs.e"]})
         assert r.status_code == 200 and r.json()["tables"][0]["columns"][1]["name"] == "opened_at"
-        assert [s["name"] for s in r.json()["sources"]] == ["devices", "kyc", "weight"]
+        assert [s["name"] for s in r.json()["sources"]] == ["devices", "kyc", "weight", "tx_history"]
         r = await rest.get(f"/api/graph-contexts/{cid}/catalog", headers={"X-Forwarded-Email": STRANGER})
         assert r.status_code in (403, 404)
 
@@ -283,6 +304,45 @@ async def test_a_source_is_asked_by_its_name_in_the_context(env):
             # A source of one context is not a source of another.
             text = await _error(client, "query_source", context_id=str(other.id), name="kyc", ids=["1"])
             assert "SOURCE_NOT_DECLARED" in text and "describe_context" in text
+
+
+@pytest.mark.asyncio
+async def test_a_table_source_is_described_and_asked_with_parameters(env):
+    app, context, other, *_, calls = env
+    cid = str(context.id)
+    async with mcp_lifespan(app), _rest(app) as rest:
+        async with _mcp(app, await _token(rest)) as client:
+            cat = await _tool(client, "describe_context", context_id=cid)
+            source = next(s for s in cat["sources"] if s["name"] == "tx_history")
+            # No description of its own: the provider's. Columns as their author described them.
+            assert source["description"] == "Transactions of one account" and source["how"] == ["table"]
+            assert source["table_source"]["columns"] == [
+                {"name": "at"}, {"name": "amount", "type": "float", "description": "Amount moved", "unit": "BRL"}]
+            assert {p["name"]: (p["value"], p["overridable"]) for p in source["table_source"]["params"]} == {
+                "account": (None, True), "days": (3, True), "tenant": ("pt", False)}
+            assert "account, days" in source["ask"]["table"]["params"]
+
+            out = await _tool(client, "query_source", context_id=cid, name="tx_history",
+                              params={"account": "acc-1", "days": 2})
+            assert (out["how"], out["columns"], out["row_count"]) == ("table", ["at", "amount"], 2)
+            assert out["rows"] == [["2026-11-01", "10"], ["2026-11-02", "20"]]
+            # The context's value for what it did not open; the caller's for what it did.
+            assert out["params"] == {"account": "acc-1", "days": "2", "tenant": "pt"}
+            assert calls[-1].params == {"account": "acc-1", "days": 2, "tenant": "pt"} and calls[-1].target == {}
+            out = await _tool(client, "query_source", context_id=cid, name="tx_history", ids=["acc-1"],
+                              params={"account": "acc-1"}, row_limit=1)
+            assert out["truncated"] is True and calls[-1].target == {"type": "node", "id": "acc-1"}
+            for args, said in (
+                ({}, "account needs a value"),
+                ({"params": {"account": "a", "tenant": "us"}}, "tenant is set by the context"),
+                ({"params": {"account": "a", "days": 99}}, "above the maximum"),
+                ({"params": {"account": "boom"}}, "The ledger is down"),
+                ({"params": {"account": "a"}, "ids": ["1", "2"]}, "one item at a time"),
+                ({"params": {"account": "a"}, "how": "run"}, "INVALID_BODY"),
+            ):
+                assert said in await _error(client, "query_source", context_id=cid, name="tx_history", **args), said
+            assert "SOURCE_NOT_DECLARED" in await _error(
+                client, "query_source", context_id=str(other.id), name="tx_history", params={"account": "a"})
 
 
 @pytest.mark.asyncio

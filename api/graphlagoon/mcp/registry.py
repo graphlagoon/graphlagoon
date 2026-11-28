@@ -56,7 +56,10 @@ TOOL_ROUTES: dict[str, list[tuple[str, str]]] = {
     "list_contexts": [("GET", "/api/graph-contexts")],
     "describe_context": [("GET", _CONTEXT_CATALOG)],
     "query_context": [("POST", "/api/graph-contexts/{context_id}/query/table")],
-    "query_source": [("POST", _ENRICHMENT), ("POST", _ENRICHMENT_RUN)],
+    "query_source": [
+        ("POST", _ENRICHMENT), ("POST", _ENRICHMENT_RUN),
+        ("POST", "/api/graph-contexts/{context_id}/sources/{name}/table"),
+    ],
     "run_query": [("POST", f"{_ITEM}/run")],
     "join_tables": [("POST", f"{_CASE}/items/join")],
     "compare_tables": [("POST", f"{_CASE}/items/compare")],

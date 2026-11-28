@@ -546,6 +546,10 @@ async def run_showcase(api: str, log=print) -> dict[str, Any]:
         try:
             provider_ctx = await new_context(
                 client, edge, node, "Demo · Provider enrichment and a program that waits",
+                # Written for whoever reads the data without the page, an AI agent included.
+                "A demo payment network. Nodes are people, companies and accounts; an edge points from "
+                "who acts to what is acted on (owner -> account, payer -> payee). kyc_tier and kyc_score "
+                "are made up from the node id: do not read meaning into them. "
                 "After every query the provider 'Demo · KYC profile (Python)' adds kyc_tier and "
                 "kyc_score to each node (in a real deployment it would read Lakebase). The chip under the "
                 "graph shows it running, done or failed. The cluster program 'Demo · Group by KYC tier "
@@ -558,13 +562,22 @@ async def run_showcase(api: str, log=print) -> dict[str, Any]:
                     # The author sets the scheme; whoever runs it by hand may pick another.
                     "provider": {"name": "demo-kyc", "target": "nodes", "run": "auto",
                                  "params": {"scheme": "3-tier"}, "runtime_params": ["scheme"]},
+                }, {
+                    # A table source: the context declares the provider under its own name. The
+                    # right-click action below and AI agents (query_source) use it by that name.
+                    "name": "monthly_activity",
+                    "label": "Demo · Monthly activity",
+                    "description": "Transactions and amount per month and channel of one node. "
+                                   "Give the node's id; ask for fewer months to keep it short.",
+                    "table_provider": {"name": "demo-activity", "params": {"months": 6},
+                                       "runtime_params": ["node", "months", "channel"]},
                 }],
-                # A table from a provider registered in Python: right-click a node.
+                # A table from that source: right-click a node.
                 context_menu_actions=[{
                     "id": "demo-activity", "kind": "run-table-provider",
                     "label": "Demo · Monthly activity (provider)", "icon": "▦", "enabled": True,
-                    "match": {"target": "node"}, "provider": "demo-activity",
-                    "paramBindings": {}, "params": {},
+                    "match": {"target": "node"}, "source": "monthly_activity",
+                    "paramBindings": {"node": "{node_id}"},
                 }],
                 cluster_programs=[{
                     "program_id": "demo-kyc-tier-waits",

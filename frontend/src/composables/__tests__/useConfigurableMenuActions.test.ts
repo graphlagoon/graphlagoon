@@ -593,26 +593,29 @@ describe('canvas tables (show-table)', () => {
   });
 });
 
-describe('table from a registered provider (run-table-provider)', () => {
+describe('table from a source the context declares (run-table-provider)', () => {
   const config = {
-    id: 'cfg-provider', label: 'Transactions (API)', enabled: true, kind: 'run-table-provider', provider: 'tx-history',
+    id: 'cfg-provider', label: 'Transactions (API)', enabled: true, kind: 'run-table-provider', source: 'tx_history',
     paramBindings: { account: '{node_id}' }, params: { days: 30 }, match: { target: 'both' },
   } as ContextMenuActionConfig;
+  const declared = [{ name: 'tx_history', label: 'Transactions', table_provider: { name: 'tx-history', runtime_params: ['account', 'days'] } }];
 
   afterEach(() => {
     delete window.__GRAPH_LAGOON_CONFIG__;
   });
 
-  it('opens the server table with the bound values; hidden when the provider is not here or has no table for the item', async () => {
+  it('opens the server table with the bound values; hidden when the source is not declared, not registered, or has no table for the item', async () => {
     seedGraph();
-    useGraphStore().currentContext = { id: 'ctx-1' } as never;
+    window.__GRAPH_LAGOON_CONFIG__ = {
+      table_providers: [{ name: 'tx-history', label: 'Transactions', description: '', targets: ['node'], params: [] }],
+    };
+    // Registered on the server, but this context does not declare it.
+    useGraphStore().currentContext = { id: 'ctx-1', enrichment_tables: [] } as never;
     useContextMenuActionsStore().hydrateFromContext([config]);
     const menu = useConfigurableMenuActions();
     menu.register();
     expect(menu.isVisible(config, nodeTarget('n2'))).toBe(false);
-    window.__GRAPH_LAGOON_CONFIG__ = {
-      table_providers: [{ name: 'tx-history', label: 'Transactions', description: '', targets: ['node'], params: [] }],
-    };
+    useGraphStore().currentContext = { id: 'ctx-1', enrichment_tables: declared } as never;
     expect(menu.isVisible(config, nodeTarget('n2'))).toBe(true);
     await menu.runAction(config, nodeTarget('n2'));
     expect(menu.pendingTable.value).toEqual({
@@ -625,5 +628,17 @@ describe('table from a registered provider (run-table-provider)', () => {
     });
     const edgeId = useGraphStore().edges[0]?.edge_id;
     if (edgeId) expect(menu.isVisible(config, { type: 'edge', id: edgeId, label: '' })).toBe(false);
+    // Declared, but its provider is gone from the server.
+    window.__GRAPH_LAGOON_CONFIG__ = { table_providers: [] };
+    expect(menu.isVisible(config, nodeTarget('n2'))).toBe(false);
+  });
+
+  it('on a case canvas reads the sources of the canvas context', () => {
+    seedGraph();
+    window.__GRAPH_LAGOON_CONFIG__ = {
+      table_providers: [{ name: 'tx-history', label: 'Transactions', description: '', targets: ['node'], params: [] }],
+    };
+    const menu = useConfigurableMenuActions({ contextId: () => 'ctx-case', enrichmentTables: () => declared as never });
+    expect(menu.isVisible(config, nodeTarget('n2'))).toBe(true);
   });
 });

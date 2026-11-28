@@ -15,7 +15,7 @@
 import { bulletList, propertyList, metricList, type SkillProperty, type SkillMetric } from './clusterProgramSkill'
 import { sourceSchemaSection } from './stylePresetSkill'
 import type { PortableSourceSchema } from '@/types/portable'
-import type { TableProviderInfo } from '@/types/graph'
+import type { TableSourceInfo } from './enrichmentSources'
 import { paramLines } from './providerParams'
 
 export type { SkillProperty, SkillMetric }
@@ -45,10 +45,10 @@ export interface ContextMenuActionSkillInput {
   /** Query templates available in this context (for run-query-template actions) */
   queryTemplates: SkillQueryTemplate[]
   /**
-   * Table providers registered on this server (for run-table-provider actions):
-   * every one, with what it returns and its parameters.
+   * The table sources this context declares (for run-table-provider actions):
+   * every one, with what it returns and the parameters an action may set.
    */
-  tableProviders?: TableProviderInfo[]
+  tableSources?: TableSourceInfo[]
   /** Session-computed node metrics (available as `{metric:<name>}`) */
   nodeMetrics?: SkillMetric[]
   /** Session-computed edge metrics */
@@ -92,33 +92,38 @@ function templateList(templates: SkillQueryTemplate[]): string {
     .join('\n')
 }
 
-/** Every registered table provider: what it returns, for what, with which parameters. */
-export function tableProviderList(providers: TableProviderInfo[]): string {
-  if (providers.length === 0) {
-    return '  (no table providers registered on this server: do not write `run-table-provider` actions)'
+/** Every table source of the context: what it returns, for what, with which open parameters. */
+export function tableSourceList(sources: TableSourceInfo[]): string {
+  const usable = sources.filter((t) => t.registered)
+  if (usable.length === 0) {
+    return '  (this context declares no table source: do not write `run-table-provider` actions; someone with the "Create graph contexts" permission can declare one in the context form)'
   }
-  return providers
-    .map((p) => {
-      const what = p.description ? ` — ${p.description}` : ' — (no description)'
-      return `  - name: \`${p.name}\` — "${p.label}"${what}\n    Has a table for: ${p.targets.join(', ')}. Parameters:\n${paramLines(p.params, '      ')}`
+  return usable
+    .map((t) => {
+      const what = t.description ? ` — ${t.description}` : ' — (no description)'
+      const returns = t.columns.length ? ` Returns: ${t.columns.join(', ')}.` : ''
+      const closed = t.locked.length
+        ? `\n    Set by the context (do not bind or fix these): ${t.locked.map((l) => `${l.name} = ${l.value || 'none'}`).join(', ')}.`
+        : ''
+      return `  - source: \`${t.name}\` — "${t.label}"${what}\n    Has a table for: ${t.targets.join(', ')}.${returns} Parameters an action may bind or fix:\n${paramLines(t.params, '      ')}${closed}`
     })
     .join('\n')
 }
 
-/** A run-table-provider example with a real registered name ('' when there is none). */
-function tableProviderExample(providers: TableProviderInfo[]): string {
-  const p = providers[0]
-  if (!p) return ''
-  const target = p.targets[0] ?? 'node'
-  const first = p.params?.find((x) => x.type === 'str' && !x.choices?.length)
+/** A run-table-provider example with a real source of this context ('' when there is none). */
+function tableSourceExample(sources: TableSourceInfo[]): string {
+  const t = sources.find((x) => x.registered)
+  if (!t) return ''
+  const target = t.targets[0] ?? 'node'
+  const first = t.params.find((x) => x.type === 'str' && !x.choices?.length)
   const bindings = first ? { [first.name]: target === 'node' ? '{node_id}' : '{edge_id}' } : {}
   const action = {
     kind: 'run-table-provider',
-    label: p.label,
+    label: t.label,
     icon: '▦',
     enabled: true,
     match: { target },
-    provider: p.name,
+    source: t.name,
     paramBindings: bindings,
     params: {},
   }
@@ -132,7 +137,7 @@ function tableProviderExample(providers: TableProviderInfo[]): string {
  */
 export function buildContextMenuActionSkill(input: ContextMenuActionSkillInput): string {
   const { nodeTypes, edgeTypes, nodeProperties, edgeProperties, queryTemplates } = input
-  const tableProviders = input.tableProviders ?? []
+  const tableSources = input.tableSources ?? []
   const nodeMetrics = input.nodeMetrics ?? []
   const edgeMetrics = input.edgeMetrics ?? []
   const graphViewUrl = input.graphViewUrl || 'https://YOUR_APP_HOST/graph/YOUR_CONTEXT_ID'
@@ -213,8 +218,8 @@ time**, referencing the actual types, properties and templates above:
   strings)?
 - Which saved query templates would be useful to trigger from a node or edge,
   and which property fills each parameter?${
-    tableProviders.length
-      ? `\n- Would any of the table providers listed above answer a question I ask about a\n  node or edge (read their descriptions)? Which property is the id they need?`
+    tableSources.some((t) => t.registered)
+      ? `\n- Would any of the table sources listed above answer a question I ask about a\n  node or edge (read their descriptions)? Which property is the id they need?`
       : ''
   }
 - Should an action apply to all types or only when a property is present /
@@ -277,21 +282,22 @@ ${adaptSection}
      direction})\`, \`metric(ref, id)\`, \`selectedNodeIds\`. Return an array
      of objects or \`{columns, rows}\`. \`paramBindings\` fills params from
      the clicked item. Agents can run neighborhood tables, not programs.
-6. \`run-table-provider\` — rows about the clicked item from **a table
-   provider this server registered in code** (for example a call to an
-   internal service or another database: data that is neither on the canvas
-   nor reachable by a query template). It runs on the server and opens the
-   same table window; it also works on a case canvas and agents can run it.
-   \`provider\` is one of the names under "Table providers on this server"
-   below — **use only those names, never invent one**, and read each
-   description to decide when it fits. Each of its parameters gets its value
-   from one of: \`paramBindings\` (name → template filled from the clicked
-   item, e.g. \`{"account": "{node_id}"}\`; the provider receives only its
-   parameters, so pass the item's id or properties this way), \`params\`
-   (name → a value fixed by the action, which the person running it cannot
-   change; it must respect the parameter's type, bounds and options), or
-   neither (the declared default applies and the person may edit it in the
-   window; a required one with no default is asked there).
+6. \`run-table-provider\` — rows about the clicked item from **a table source
+   of this context**: code the deployment registered (for example a call to an
+   internal service or another database: data that is neither on the canvas nor
+   reachable by a query template), declared by the context's owner. It runs on
+   the server and opens the same table window; it also works on a case canvas
+   and agents can run it. \`source\` is one of the names under "Table sources
+   of this context" below — **use only those names, never invent one**, and
+   read each description to decide when it fits. Each parameter listed there
+   gets its value from one of: \`paramBindings\` (name → template filled from
+   the clicked item, e.g. \`{"account": "{node_id}"}\`; the source receives
+   only its parameters, so pass the item's id or properties this way),
+   \`params\` (name → a value fixed by the action, which the person running
+   it cannot change; it must respect the parameter's type, bounds and options),
+   or neither (the default applies and the person may edit it in the window; a
+   required one with no default is asked there). Parameters "set by the
+   context" are not yours to bind or fix.
 
 ## The JSON shape (your final output)
 
@@ -362,7 +368,7 @@ Output a JSON array of action objects:
       "code": "const ids = hops(item.node_id, 2).map(n => n.node_id);\\nreturn edgesOf(ids, { types: ['TRANSFER'] })\\n  .filter(e => Number(e.properties?.amount) >= Number(params.min_amount))\\n  .map(e => ({ src: e.src, dst: e.dst, amount: e.properties?.amount }));"
     }
   },
-${tableProviderExample(tableProviders)}  {
+${tableSourceExample(tableSources)}  {
     "kind": "show-same-value",
     "label": "Show only this branch",
     "enabled": true,
@@ -468,8 +474,8 @@ ${metricList(edgeMetrics, 'none computed in this session')}
 **Query templates in this context (for \`run-query-template\`):**
 ${templateList(queryTemplates)}
 
-**Table providers on this server (for \`run-table-provider\`; this is the complete list):**
-${tableProviderList(tableProviders)}
+**Table sources of this context (for \`run-table-provider\`; this is the complete list):**
+${tableSourceList(tableSources)}
 
 ${howToHelp}
 `

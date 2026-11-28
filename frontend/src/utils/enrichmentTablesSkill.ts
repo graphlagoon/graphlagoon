@@ -1,4 +1,4 @@
-import type { EnrichmentProviderInfo } from '@/types/graph';
+import type { EnrichmentProviderInfo, TableProviderInfo } from '@/types/graph';
 import { paramLines } from './providerParams';
 
 /**
@@ -25,6 +25,20 @@ export interface EnrichmentTablesSkillInput {
   currentYaml: string;
   /** Enrichment providers registered on this server (code, not SQL), with what each does. */
   providers?: EnrichmentProviderInfo[];
+  /** Table providers registered on this server: what a `table_provider` entry (a table source) may name. */
+  tableProviders?: TableProviderInfo[];
+}
+
+/** The registered table providers as the prompt lists them. */
+export function tableProviderSection(providers: TableProviderInfo[] | undefined): string {
+  if (!providers?.length) {
+    return 'No table provider is registered on this server: do not write `table_provider` entries.';
+  }
+  const items = providers.map((p) => {
+    const returns = p.columns?.length ? `\n  Returns: ${p.columns.map((c) => `\`${c}\``).join(', ')}.` : '';
+    return `- \`${p.name}\` — ${p.label}. Has a table for: ${p.targets.join(', ')}.\n  ${p.description || '(no description)'}${returns}\n  Parameters:\n${paramLines(p.params)}`;
+  });
+  return `These are ALL the table providers registered on this server. Use only these names; never invent one.\n\n${items.join('\n')}`;
 }
 
 /** The registered providers as the prompt lists them: what each adds, to what, with which parameters. */
@@ -58,6 +72,22 @@ function providerExample(providers: EnrichmentProviderInfo[] | undefined): strin
   if (param) {
     lines.push(`      params: {${param.name}: ${JSON.stringify(param.default)}}`, `      runtime_params: [${param.name}]   # optional: what a run may change`);
   }
+  return `${lines.join('\n')}\n`;
+}
+
+/** A table source entry for the YAML example, with a real registered name ('' when there is none). */
+function tableSourceExample(providers: TableProviderInfo[] | undefined): string {
+  const p = providers?.[0];
+  if (!p) return '';
+  const open = (p.params ?? []).map((x) => x.name);
+  const lines = [
+    `  - name: ${p.name.replace(/[^a-z0-9]+/g, '_').replace(/^[^a-z]+/, '') || 'source'}_source            # a table source: rows about one item`,
+    `    label: ${p.label}`,
+    '    description: <what it returns and when to use it>',
+    '    table_provider:',
+    `      name: ${p.name}`,
+  ];
+  if (open.length) lines.push(`      runtime_params: [${open.join(', ')}]   # what an action or an agent may set`);
   return `${lines.join('\n')}\n`;
 }
 
@@ -103,6 +133,8 @@ An entry with neither just authorizes its table so another entry's query can joi
 3. **Or, with no table at all, enrich with a provider**: code the deployment registered in Python
    (it may call an internal service or another database). The entry only names it (\`provider.name\`),
    picks the \`target\` and \`run\`, and may set its parameters. See "Providers" below.
+4. **Or declare a table source** (\`table_provider\`): rows about one item from registered code,
+   for right-click actions and AI agents. See "Table sources" below.
 
 Give every entry that looks nodes up or runs a query a \`description\` (optional, up to 1000
 characters): what it adds and when to use it, in one or two sentences. People see it next to the
@@ -128,6 +160,21 @@ change — leave it out unless I ask, so nobody changes a value I fixed. \`node_
 \`edge_props: true\` send the node / edge properties to the provider (otherwise ids and types only):
 set them only when the provider's description says it needs them. A provider entry has no
 \`table\`, \`query\` or lookup fields.
+
+## Table sources
+
+A **table source** is a different kind of entry: it enriches nothing. It declares that this context
+may use a registered *table provider* — code that returns **rows about one node or edge** (the
+transactions of this account from the ledger service). Right-click actions and AI agents then use
+it by the entry's \`name\`; a provider this list does not declare cannot be used in this context.
+
+${tableProviderSection(input.tableProviders)}
+
+In a table source entry (\`table_provider\`): \`params\` sets this context's values;
+\`runtime_params\` lists the parameters whoever asks may set (an action's binding, a person in
+the table window, an AI agent). List there the ones that identify what is asked (an account id, a
+window); leave out the ones that scope the data for this context (a tenant, a region), which then
+stay fixed. It has no \`table\`, \`query\`, lookup or \`provider\` fields.
 
 ## How a query reads the graph
 
@@ -199,7 +246,7 @@ enrichment_tables:
     match_source: node_id     # or {kind: prop, name: <node property>}
     cardinality: many         # one: columns become node properties; many: a table in the inspector
     columns: [device_id, ip, seen_at]
-${providerExample(input.providers)}\`\`\`
+${providerExample(input.providers)}${tableSourceExample(input.tableProviders)}\`\`\`
 
 ## What is configured now
 

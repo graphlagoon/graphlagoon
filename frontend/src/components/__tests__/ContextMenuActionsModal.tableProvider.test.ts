@@ -1,7 +1,8 @@
 /**
- * A "Table from a provider" action: the editor lists every table provider the
- * server registered with what it returns, and each declared parameter is left to
- * the table window, bound to the clicked item, or fixed. The modal teleports to body.
+ * A "Table from a provider" action: the editor lists the table sources the context
+ * declares, with what each returns; each parameter the context opened is left to the
+ * table window, bound to the clicked item, or fixed, and the ones it closed are shown
+ * as set. The modal teleports to body.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/vue';
@@ -27,10 +28,15 @@ const PROVIDERS = [{
   ],
 }];
 
-async function open() {
+const SOURCES = [{
+  name: 'tx_history', label: 'Transactions (ledger)', description: 'What this context says the source is.',
+  table_provider: { name: 'tx-history', params: { kind: 'ted' }, runtime_params: ['account', 'days'] },
+}];
+
+async function open(enrichment_tables: unknown[] = SOURCES) {
   useGraphStore().currentContext = {
     id: 'ctx-1', title: 'Accounts', has_write_access: true, node_types: ['Account'],
-    relationship_types: [], node_properties: [], edge_properties: [],
+    relationship_types: [], node_properties: [], edge_properties: [], enrichment_tables,
   } as any;
   render(ContextMenuActionsModal, { props: { modelValue: true } });
   await nextTick();
@@ -47,11 +53,12 @@ describe('ContextMenuActionsModal — table from a provider', () => {
     delete window.__GRAPH_LAGOON_CONFIG__;
   });
 
-  it('is offered only when the server has a provider', async () => {
-    await open();
+  it('is offered only when the context declares a table source', async () => {
+    window.__GRAPH_LAGOON_CONFIG__ = { table_providers: PROVIDERS as never };
+    await open([]);
     const option = el('menu-action-kind')!.querySelector('option[value="run-table-provider"]') as HTMLOptionElement;
     expect(option.disabled).toBe(true);
-    expect(option.textContent).toContain('none registered on this server');
+    expect(option.textContent).toContain('this context declares no table source');
   });
 
   it('shows what the provider returns and saves bindings and fixed values', async () => {
@@ -60,14 +67,16 @@ describe('ContextMenuActionsModal — table from a provider', () => {
     await fireEvent.update(el('menu-action-kind')!, 'run-table-provider');
     const save = el('menu-action-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    await fireEvent.update(el('menu-action-provider-select')!, 'tx-history');
-    expect(el('menu-action-provider-description')!.textContent).toContain('Transactions of one account from the ledger service.');
+    await fireEvent.update(el('menu-action-provider-select')!, 'tx_history');
+    // The context's description of the source wins over the provider's.
+    expect(el('menu-action-provider-description')!.textContent).toContain('What this context says the source is.');
+    // Only what the context opened is configurable; what it closed is shown as set.
     const rows = [...document.body.querySelectorAll('[data-testid="menu-action-provider-param"]')];
     expect(rows.map((r) => r.textContent)).toEqual([
       expect.stringContaining('Account id'),
       expect.stringContaining('Window (int, 1 to 365)'),
-      expect.stringContaining('one of pix, ted'),
     ]);
+    expect(el('menu-action-provider-locked')!.textContent).toContain('kind = ted');
     expect(save.disabled).toBe(false);
 
     await fireEvent.update(el('menu-action-provider-how-account')!, 'bind');
@@ -82,7 +91,7 @@ describe('ContextMenuActionsModal — table from a provider', () => {
     await fireEvent.click(save);
     const store = useContextMenuActionsStore();
     expect(store.actionConfigs[0]).toMatchObject({
-      kind: 'run-table-provider', provider: 'tx-history', paramBindings: { account: '{node_id}' }, params: { days: 30 },
+      kind: 'run-table-provider', source: 'tx_history', paramBindings: { account: '{node_id}' }, params: { days: 30 },
     });
 
     // Reopens as saved.
@@ -91,14 +100,14 @@ describe('ContextMenuActionsModal — table from a provider', () => {
     await nextTick();
     expect((el('menu-action-provider-how-days') as HTMLSelectElement).value).toBe('fixed');
     expect((el('menu-action-provider-value-account') as HTMLInputElement).value).toBe('{node_id}');
-    expect((el('menu-action-provider-how-kind') as HTMLSelectElement).value).toBe('run');
+    expect(el('menu-action-provider-how-kind')).toBeNull();
   });
 
   it('says when the provider has no table for what the action applies to', async () => {
     window.__GRAPH_LAGOON_CONFIG__ = { table_providers: PROVIDERS as never };
     await open();
     await fireEvent.update(el('menu-action-kind')!, 'run-table-provider');
-    await fireEvent.update(el('menu-action-provider-select')!, 'tx-history');
+    await fireEvent.update(el('menu-action-provider-select')!, 'tx_history');
     const applies = [...document.body.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'both'))!;
     await fireEvent.update(applies, 'edge');
     expect(el('menu-action-provider-target-error')!.textContent).toContain('no table for edges');

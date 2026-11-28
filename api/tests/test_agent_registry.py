@@ -65,6 +65,7 @@ ALL_ROUTES |= {
     # The context as a data catalog: listing, describing, and (below) the console's table query.
     or k == ("GET", "/api/graph-contexts")
     or k == ("GET", "/api/graph-contexts/{context_id}/catalog")
+    or "/sources/" in k[1]
 }
 # Of the graph routes, the two that change an exploration's graph through a tool.
 ALL_ROUTES |= {

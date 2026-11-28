@@ -16,9 +16,11 @@ splice ``$id`` as text, like the browser does, so a value that could leave a
 quoted literal, chain a statement or name another parameter is refused.
 
 A ``run-table-provider`` action is the other table action: instead of a query
-template it names a provider the deployer registered in Python
-(``services/table_providers.py``). Same route, same response, same callers; its
-parameters are the provider's declared ones, typed and bounded, never spliced.
+template it points at a table source the context declares (an
+``enrichment_tables`` entry with ``table_provider``: a provider the deployer
+registered in Python, ``services/table_providers.py``). Same route, same
+response, same callers; its parameters are the provider's declared ones, typed
+and bounded, never spliced. ``run_source`` asks a source with no action.
 """
 
 from __future__ import annotations
@@ -372,18 +374,47 @@ def _hint(spec) -> str:
     return f"{said} ({', '.join(bounds)})" if said and bounds else said or ", ".join(bounds)
 
 
-def find_provider(context, action: dict, target: dict):
-    """The action's registered provider, if it serves this kind of item and context."""
+def table_sources(context) -> list[dict]:
+    """The context's table-source entries (``enrichment_tables`` with ``table_provider``)."""
+    return [t for t in (getattr(context, "enrichment_tables", None) or []) if t.get("table_provider")]
+
+
+def find_source(context, action: dict) -> dict:
+    """The table source an action points at. ``source`` is the entry's name; an
+    action written before sources existed names a ``provider`` instead and gets the
+    first source of the context that uses it. No declared source, no run: the
+    declaration (which takes ``context.create``) is what lets a context use a provider."""
+    declared = table_sources(context)
+    name = action.get("source")
+    if name:
+        entry = next((t for t in declared if t.get("name") == name), None)
+    else:
+        legacy = action.get("provider")
+        entry = next((t for t in declared if t["table_provider"].get("name") == legacy), None)
+    if entry is None:
+        wanted = name or action.get("provider") or ""
+        names = ", ".join(t["name"] for t in declared) or "none"
+        raise MenuActionError(
+            400, "TABLE_SOURCE_NOT_DECLARED",
+            f"This context declares no table source '{wanted}' (it has: {names}). Someone with the "
+            '"Create graph contexts" permission declares one in the context form.',
+        )
+    return entry
+
+
+def find_provider(context, entry: dict, target: Optional[dict] = None):
+    """The registered provider of a table source, if it is for this context and (with
+    a ``target``) has a table for that kind of item."""
     from graphlagoon.services.table_providers import get_table_provider
 
-    name = action.get("provider") or ""
+    name = entry["table_provider"].get("name") or ""
     provider = get_table_provider(name)
     if provider is None:
         raise MenuActionError(
             400, "TABLE_PROVIDER_NOT_REGISTERED", f"No table provider '{name}' is registered on this server"
         )
-    kind = target.get("type", "node")
-    if kind not in provider.targets:
+    kind = (target or {}).get("type")
+    if kind and kind not in provider.targets:
         raise MenuActionError(
             400, "TABLE_PROVIDER_TARGET", f"The provider '{provider.name}' has no table for a {kind}"
         )
@@ -395,33 +426,49 @@ def find_provider(context, action: dict, target: dict):
 
 
 def bind_provider_parameters(
-    provider, action: dict, target: dict, given: dict[str, Any], strict: bool = True
+    provider, entry: dict, action: dict, target: dict, given: dict[str, Any], strict: bool = True
 ) -> tuple[list[dict], dict, dict]:
-    """``bind_parameters`` for a provider's declared parameters: each with its value
-    and origin, the ``problems``, and the typed values to hand the provider. A value
-    the action fixes (``params``) wins and cannot be changed by the caller."""
+    """``bind_parameters`` for a table source: each declared parameter with its value
+    and origin, the ``problems``, and the typed values to hand the provider.
+
+    A parameter the source does not open (``runtime_params``) takes the context's
+    value and is locked. An open one: the action's fixed value (locked), else the
+    caller's, else the action's binding, else the context's value, else the default."""
     from graphlagoon.services.precomputed.params import ParamError, coerce_values
 
+    ref = entry["table_provider"]
+    context_values = {k: v for k, v in (ref.get("params") or {}).items() if v is not None and v != ""}
+    opened = set(ref.get("runtime_params") or [])
     known = {p.name for p in provider.params}
     problems: dict[str, str] = {
         k: "the provider has no such parameter" for k in given if strict and k not in known
     }
     bindings = action.get("paramBindings") or {}
-    fixed = {k: v for k, v in (action.get("params") or {}).items() if v is not None and v != ""}
+    fixed = {k: v for k, v in (action.get("params") or {}).items()
+             if v is not None and v != "" and k in opened}
     out, values = [], {}
     for spec in provider.params:
         name = spec.name
         asked = _text(given.get(name)).strip()
-        if name in fixed:
+        fallback = _text(context_values.get(name, spec.default))
+        locked = name not in opened or name in fixed
+        binding = None
+        if name not in opened:
+            value, origin = fallback, "default"
+            if strict and asked and asked != value.strip():
+                problems[name] = "is set by the context and cannot be changed"
+        elif name in fixed:
             value, origin = _text(fixed[name]), "default"
             if strict and asked and asked != value.strip():
                 problems[name] = "is fixed by the action and cannot be changed"
-        elif asked:
-            value, origin = asked, "given"
-        elif bindings.get(name) and (bound := resolve_binding(bindings[name], target)):
-            value, origin = bound, "binding"
         else:
-            value, origin = _text(spec.default), "default"
+            binding = bindings.get(name)
+            if asked:
+                value, origin = asked, "given"
+            elif binding and (bound := resolve_binding(binding, target)):
+                value, origin = bound, "binding"
+            else:
+                value, origin = fallback, "default"
         value = value.strip()
         if not value:
             values[name] = None
@@ -439,10 +486,10 @@ def bind_provider_parameters(
             "options": list(spec.choices) if spec.choices else None,
             "required": spec.required,
             "description": _hint(spec) or None,
-            "binding": bindings.get(name),
+            "binding": binding,
             "value": value,
             "source": origin,
-            "locked": name in fixed,
+            "locked": locked,
         })
     return out, problems, values
 
@@ -454,6 +501,23 @@ def _rows(columns: list[str], rows: list, row_limit: int) -> list[list[Optional[
         cells = (cells + [None] * len(columns))[: len(columns)]
         out.append([None if c is None else _text(c) for c in cells])
     return out
+
+
+async def run_source(
+    context, user_email: str, name: str, given: Optional[dict[str, Any]] = None,
+    target: Optional[dict] = None, row_limit: int = 1000, user_token: Optional[str] = None,
+) -> dict:
+    """A table source asked directly, by its name in the context, with no action:
+    the caller gives the open parameters (and, when the provider reads the clicked
+    item, a ``target``). Same result as an action's run."""
+    entry = next((t for t in table_sources(context) if t.get("name") == name), None)
+    if entry is None:
+        names = ", ".join(t["name"] for t in table_sources(context)) or "none"
+        raise MenuActionError(
+            404, "TABLE_SOURCE_NOT_DECLARED", f"This context declares no table source '{name}' (it has: {names})"
+        )
+    action = {"id": name, "label": entry.get("label") or name, "source": name}
+    return await run_provider(context, user_email, action, target or {}, given or {}, row_limit, True, user_token)
 
 
 async def run_provider(
@@ -469,13 +533,14 @@ async def run_provider(
         TableProviderResult,
     )
 
-    provider = find_provider(context, action, target)
-    parameters, problems, values = bind_provider_parameters(provider, action, target, given, strict)
+    entry = find_source(context, action)
+    provider = find_provider(context, entry, target)
+    parameters, problems, values = bind_provider_parameters(provider, entry, action, target, given, strict)
     result: dict[str, Any] = {
         "action_id": action["id"],
         "label": action.get("label"),
         "template_id": None,
-        "template_name": provider.label or provider.name,
+        "template_name": entry.get("label") or provider.label or provider.name,
         "query_type": "provider",
         "parameters": parameters,
         "problems": problems,

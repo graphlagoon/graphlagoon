@@ -461,9 +461,9 @@ Human twin: `POST /api/graph-contexts/{context_id}/query/table`
 
 ### query_source
 
-Ask one declared source of a context (a ``name`` under ``sources`` in describe_context) about some ids, and get its values back; nothing is written to any graph. Its ``ask`` says what to pass. how="lookup": ``ids`` are key values; returns ``rows`` {id: [row]}. how="run" (an enrichment query or provider): ``ids`` are node ids; returns ``rows`` {id: {column: value}} for the ids it knows. Use ``items`` instead of ``ids`` when it needs more than the id: [{node_id, node_type, properties}], or for a source that enriches edges [{edge_id, src, dst, relationship_type}]. ``how`` defaults to the first the source offers. ``params`` sets a provider's parameters marked ``overridable``; the result's ``params`` are the values used. ``truncated`` means not every id was reached; ``partial`` with ``error`` that a later batch failed.
+Ask one declared source of a context (a ``name`` under ``sources`` in describe_context) and get its values back; nothing is written to any graph. Its ``ask`` says what to pass. how="table" (a table source: rows from code the deployment registered, e.g. an internal service): ``params`` sets its ``overridable`` parameters, the others keep the context's values; returns ``columns`` and ``rows`` (``row_limit`` 200 by default, 5000 at most). Pass one id in ``ids`` when its ``ask`` says it reads the item it is about. how="lookup": ``ids`` are key values; returns ``rows`` {id: [row]}. how="run" (an enrichment query or provider): ``ids`` are node ids; returns ``rows`` {id: {column: value}} for the ids it knows. Use ``items`` instead of ``ids`` when it needs more than the id: [{node_id, node_type, properties}], or for a source that enriches edges [{edge_id, src, dst, relationship_type}]. ``how`` defaults to the first the source offers. ``params`` sets a provider's parameters marked ``overridable``; the result's ``params`` are the values used. ``truncated`` means not every id was reached; ``partial`` with ``error`` that a later batch failed.
 
-Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`, `POST /api/graph-contexts/{context_id}/enrichment/{name}/run`
+Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`, `POST /api/graph-contexts/{context_id}/enrichment/{name}/run`, `POST /api/graph-contexts/{context_id}/sources/{name}/table`
 
 | Parameter | Type | Required | Default |
 |---|---|---|---|
@@ -473,6 +473,7 @@ Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`, `P
 | `items` | list of object |  | null |
 | `params` | object |  | null |
 | `how` | string |  | null |
+| `row_limit` | integer |  | `200` |
 
 ## Queries and tables
 
@@ -687,7 +688,7 @@ Human twin: `POST /api/graph-contexts/{context_id}/enrichment/{name}/lookup`
 
 ### list_entity_actions
 
-The table actions people configured on the right-click menu of the entity's contexts (e.g. "Transactions of the linked accounts, last 30 days"): each with its parameters, the value each one would take for this entity, and what is still missing. Run one with run_entity_action. ``source`` says where the rows come from: "warehouse" (a query template), "provider" (code the deployment registered, e.g. a call to an internal service; ``description`` says what it returns; a parameter with ``locked: true`` is fixed by the action) or "canvas" (computed from the case graph: a neighbors walk, which runs here, or a JavaScript program, ``runs_in: "browser"``, listed with its code for reference).
+The table actions people configured on the right-click menu of the entity's contexts (e.g. "Transactions of the linked accounts, last 30 days"): each with its parameters, the value each one would take for this entity, and what is still missing. Run one with run_entity_action. ``source`` says where the rows come from: "warehouse" (a query template), "provider" (a table source of the context: code the deployment registered, e.g. a call to an internal service; ``description`` says what it returns; a parameter with ``locked: true`` is set by the context or fixed by the action; query_source asks the same source with no entity) or "canvas" (computed from the case graph: a neighbors walk, which runs here, or a JavaScript program, ``runs_in: "browser"``, listed with its code for reference).
 
 Human twin: `GET /api/graph-contexts/{context_id}`
 

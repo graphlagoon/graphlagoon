@@ -65,29 +65,34 @@ describe('buildContextMenuActionSkill', () => {
     expect(tables.map((c) => c.kind === 'show-table' && c.source.type)).toEqual(['neighborhood', 'program']);
   });
 
-  it('lists every table provider with what it returns and its parameters, and its example imports', () => {
-    expect(buildContextMenuActionSkill(INPUT)).toContain('no table providers registered on this server');
-    const providers = [{
-      name: 'tx-history', label: 'Transactions (API)', description: 'Transactions of one account from the ledger service.',
-      targets: ['node' as const],
+  it('lists every table source of the context with what it returns and its open parameters, and its example imports', () => {
+    expect(buildContextMenuActionSkill(INPUT)).toContain('this context declares no table source');
+    const sources = [{
+      name: 'tx_history', label: 'Transactions (ledger)', description: 'Transactions of one account from the ledger service.',
+      provider: 'tx-history', registered: true, targets: ['node' as const], columns: ['at', 'amount'],
       params: [
         { name: 'account', type: 'str' as const, required: true, default: null, description: 'Account id', choices: null, min: null, max: null },
         { name: 'days', type: 'int' as const, required: false, default: 90, description: 'Window', choices: null, min: 1, max: 365 },
       ],
+      locked: [{ name: 'tenant', value: 'br' }],
     }];
-    const skill = buildContextMenuActionSkill({ ...INPUT, tableProviders: providers });
-    expect(skill).toContain('name: `tx-history` — "Transactions (API)" — Transactions of one account from the ledger service.');
-    expect(skill).toContain('Has a table for: node.');
+    const skill = buildContextMenuActionSkill({ ...INPUT, tableSources: sources });
+    expect(skill).toContain('source: `tx_history` — "Transactions (ledger)" — Transactions of one account from the ledger service.');
+    expect(skill).toContain('Has a table for: node. Returns: at, amount.');
     expect(skill).toContain('- `account` (str, required): Account id');
     expect(skill).toContain('- `days` (int, default 90, min 1, max 365): Window');
+    expect(skill).toContain('Set by the context (do not bind or fix these): tenant = br.');
     expect(skill).toContain('never invent one');
-    expect(skill).toContain('Would any of the table providers listed above');
-    const r = parseImportedActionConfigs(skill.split('```json')[1].split('```')[0], providers);
+    expect(skill).toContain('Would any of the table sources listed above');
+    const r = parseImportedActionConfigs(skill.split('```json')[1].split('```')[0], sources);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.configs.find((c) => c.kind === 'run-table-provider')).toMatchObject({
-      provider: 'tx-history', paramBindings: { account: '{node_id}' },
+      source: 'tx_history', paramBindings: { account: '{node_id}' },
     });
+    // A source whose provider is not registered here is not offered.
+    expect(buildContextMenuActionSkill({ ...INPUT, tableSources: [{ ...sources[0], registered: false }] }))
+      .toContain('this context declares no table source');
   });
 
   it('handles empty metadata with placeholders', () => {

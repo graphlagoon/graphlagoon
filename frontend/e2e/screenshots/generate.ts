@@ -351,7 +351,7 @@ async function setupPage(page: Page) {
       table_providers: [{
         name: 'orders-api', label: 'Orders (sales service)',
         description: 'Orders of one company from the sales service, newest first. Use for recent purchases; one call per click.',
-        targets: ['node'],
+        targets: ['node'], columns: ['order_id', 'placed_at', 'amount', 'status'],
         params: [
           { name: 'company', type: 'str', required: true, default: null, description: 'Company id', choices: null, min: null, max: null },
           { name: 'days', type: 'int', required: false, default: 90, description: 'How many days back', choices: null, min: 1, max: 365 },
@@ -479,6 +479,13 @@ const DEMO_ENRICHMENT_TABLES = [
     label: 'Company risk (Lakebase)',
     description: 'Risk tier of each company from the risk service. Run before grouping or colouring by risk.',
     provider: { name: 'lakebase-risk', target: 'nodes', run: 'manual', params: { as_of_days: 90 }, runtime_params: ['as_of_days'] },
+  },
+  {
+    // A table source: the context declares the provider under its own name (for actions and agents).
+    name: 'orders',
+    label: 'Orders of a company',
+    description: 'Orders of one company from the sales service, newest first. Use for recent purchases.',
+    table_provider: { name: 'orders-api', params: { status: 'paid' }, runtime_params: ['company', 'days'] },
   },
 ];
 
@@ -651,8 +658,21 @@ const SCENES: Scene[] = [
     path: '/contexts',
     prepare: async (page) => {
       await page.getByTestId('edit-context-btn').first().click();
-      await page.getByTestId('enrichment-provider-params').scrollIntoViewIfNeeded();
-      await page.getByTestId('enrichment-provider').evaluate((el) => el.closest('[data-testid="enrichment-row"]')!.scrollIntoView({ block: 'start' }));
+      await page.getByTestId('enrichment-provider-params').first().scrollIntoViewIfNeeded();
+      await page.getByTestId('enrichment-provider').first().evaluate((el) => el.closest('[data-testid="enrichment-row"]')!.scrollIntoView({ block: 'start' }));
+      await page.waitForTimeout(300);
+    },
+  },
+  {
+    // A table source in the context form: the provider under the context's own name, and what a caller may set.
+    guide: 'bring-your-own-data',
+    scene: 'table-source',
+    path: '/contexts',
+    prepare: async (page) => {
+      await page.getByTestId('edit-context-btn').first().click();
+      const row = page.getByTestId('enrichment-row').last();
+      await row.scrollIntoViewIfNeeded();
+      await row.evaluate((el) => el.scrollIntoView({ block: 'start' }));
       await page.waitForTimeout(300);
     },
   },
@@ -1016,7 +1036,7 @@ const SCENES: Scene[] = [
     },
   },
   {
-    // The action editor on "Table from a provider": the provider's description and its parameters.
+    // The action editor on "Table from a provider": the context's table source, what it returns and its parameters.
     guide: 'context-menu-actions',
     scene: 'table-provider',
     path: GRAPH_URL,
@@ -1027,11 +1047,9 @@ const SCENES: Scene[] = [
       await page.getByTestId('menu-action-add').click();
       await page.getByTestId('menu-action-label').fill('Orders of this company');
       await page.getByTestId('menu-action-kind').selectOption('run-table-provider');
-      await page.getByTestId('menu-action-provider-select').selectOption('orders-api');
+      await page.getByTestId('menu-action-provider-select').selectOption('orders');
       await page.getByTestId('menu-action-provider-how-company').selectOption('bind');
       await page.getByTestId('menu-action-provider-value-company').fill('{node_id}');
-      await page.getByTestId('menu-action-provider-how-status').selectOption('fixed');
-      await page.getByTestId('menu-action-provider-value-status').selectOption('paid');
       await page.getByTestId('menu-action-table-provider').scrollIntoViewIfNeeded();
       await page.waitForTimeout(300);
     },

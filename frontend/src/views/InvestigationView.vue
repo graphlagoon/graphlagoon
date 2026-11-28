@@ -234,6 +234,7 @@ function sourceNodeOf(uid: string, contextId: string | null): string | null {
 }
 const configurableMenuActions = useConfigurableMenuActions({
   contextId: () => canvasContextId.value,
+  enrichmentTables: () => (canvasContextId.value ? store.contexts[canvasContextId.value]?.enrichment_tables : undefined),
   sourceNodeId: (node) => sourceNodeOf(node.node_id, canvasContextId.value),
   sourceEdge: (edge) => {
     const unified = store.unified.edges.find((e) => e.edge_id === edge.edge_id);

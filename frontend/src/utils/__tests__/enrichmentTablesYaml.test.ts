@@ -120,6 +120,19 @@ describe('provider entries', () => {
     expect(parseEnrichmentTablesYaml('- {name: k, label: K, provider: {name: kyc-demo, runtime_params: days}}').errors[0]).toContain('runtime_params');
   });
 
+  it('round-trips a table source and refuses one mixed with an enrichment', () => {
+    const entry = {
+      name: 'tx_history', label: 'Transactions', description: 'Transactions of one account.',
+      table_provider: { name: 'tx-history', params: { tenant: 'pt', days: 90 }, runtime_params: ['account'] },
+    };
+    const parsed = parseEnrichmentTablesYaml(enrichmentTablesToYaml([entry]));
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.tables).toEqual([entry]);
+    expect(parseEnrichmentTablesYaml('- {name: t, label: T, table_provider: tx-history}').tables[0].table_provider).toEqual({ name: 'tx-history' });
+    expect(parseEnrichmentTablesYaml('- {name: t, label: T, table_provider: tx-history, provider: kyc}').errors[0]).toMatch(/no table, query, lookup or provider/);
+    expect(parseEnrichmentTablesYaml('- {name: t, label: T, table_provider: {name: tx-history, params: [1]}}').errors[0]).toContain('table_provider.params');
+  });
+
   it('refuses a provider entry that also names a table', () => {
     const parsed = parseEnrichmentTablesYaml('- {name: kyc, label: K, table: a.b.c, provider: kyc-demo}');
     expect(parsed.errors[0]).toMatch(/no table/);

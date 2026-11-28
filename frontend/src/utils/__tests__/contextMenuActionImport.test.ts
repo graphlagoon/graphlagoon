@@ -326,43 +326,50 @@ describe('actionCompatibilityWarnings', () => {
 });
 
 describe('run-table-provider actions', () => {
-  const providers = [{
-    name: 'tx-history', label: 'Transactions', description: '', targets: ['node' as const],
+  // What the context declares: `account` and `days` open, `tenant` set by the context.
+  const sources = [{
+    name: 'tx_history', label: 'Transactions', description: '', provider: 'tx-history', registered: true,
+    targets: ['node' as const], columns: [],
     params: [
       { name: 'account', type: 'str' as const, required: true, default: null, description: '', choices: null, min: null, max: null },
       { name: 'days', type: 'int' as const, required: false, default: 90, description: '', choices: null, min: 1, max: 365 },
     ],
+    locked: [{ name: 'tenant', value: 'br' }],
   }];
   const action = (over: Record<string, unknown> = {}) =>
-    JSON.stringify([{ kind: 'run-table-provider', label: 'Tx', match: { target: 'node' }, provider: 'tx-history',
+    JSON.stringify([{ kind: 'run-table-provider', label: 'Tx', match: { target: 'node' }, source: 'tx_history',
       paramBindings: { account: '{node_id}' }, params: { days: '30' }, ...over }]);
 
-  it('imports one checked against its registered provider, with typed fixed values', () => {
-    const r = parseImportedActionConfigs(action(), providers);
+  it('imports one checked against the source this context declares, with typed fixed values', () => {
+    const r = parseImportedActionConfigs(action(), sources);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.configs[0]).toMatchObject({
-      kind: 'run-table-provider', provider: 'tx-history', paramBindings: { account: '{node_id}' }, params: { days: 30 },
+      kind: 'run-table-provider', source: 'tx_history', paramBindings: { account: '{node_id}' }, params: { days: 30 },
     });
+    // An action older than sources names the provider: it takes the source that uses it.
+    const legacy = parseImportedActionConfigs(action({ source: undefined, provider: 'tx-history' }), sources);
+    expect(legacy.ok && legacy.configs[0]).toMatchObject({ source: 'tx_history' });
   });
 
   it('says which field is wrong', () => {
     const error = (over: Record<string, unknown>) => {
-      const r = parseImportedActionConfigs(action(over), providers);
+      const r = parseImportedActionConfigs(action(over), sources);
       return r.ok ? '' : r.error;
     };
-    expect(error({ provider: '' })).toContain('missing "provider"');
+    expect(error({ source: '' })).toContain('missing "source"');
     expect(error({ params: { days: 9999 } })).toContain('params.days must be at most 365');
     expect(error({ paramBindings: { acct: '{node_id}' } })).toContain('has no parameter "acct" (it has: account, days)');
+    expect(error({ params: { tenant: 'us' } })).toContain('"tenant" is set by the context');
     expect(error({ match: { target: 'edge' } })).toContain('has no table for a edge');
   });
 
-  it('one whose provider this server lacks imports with a warning', () => {
-    const r = parseImportedActionConfigs(action({ provider: 'elsewhere', params: { anything: 1 } }), providers);
+  it('one whose source this context does not declare imports with a warning', () => {
+    const r = parseImportedActionConfigs(action({ source: 'elsewhere', params: { anything: 1 } }), sources);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const w = actionCompatibilityWarnings(r.configs, {
-      nodeTypes: [], edgeTypes: [], nodeProperties: [], edgeProperties: [], templateIds: [], tableProviders: ['tx-history'],
+      nodeTypes: [], edgeTypes: [], nodeProperties: [], edgeProperties: [], templateIds: [], tableSources: sources,
     });
     expect(w.missingProviders).toEqual(['elsewhere']);
     expect(hasActionCompatibilityWarnings(w)).toBe(true);

@@ -1574,6 +1574,69 @@
         }
       }
     },
+    "/graphlagoon/api/graph-contexts/{context_id}/sources/{name}/table": {
+      "post": {
+        "tags": [
+          "graph-contexts"
+        ],
+        "summary": "Run Table Source",
+        "description": "Ask a table source of the context (an ``enrichment_tables`` entry with a\n``table_provider``) directly, by its name, with no right-click action:\n``parameters`` sets the ones the source lets a caller set, ``target`` is the item\nit is about when its provider reads one. Anyone who can read the context may ask;\nthe answer has the shape of a table action's (``needs_parameters``, ``succeeded``\nor ``failed``). The agent's ``query_source`` is its twin.",
+        "operationId": "graph_contexts_run_table_source",
+        "parameters": [
+          {
+            "name": "context_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Context Id"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TableSourceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuActionTableResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/graphlagoon/api/graph-contexts/{context_id}/catalog": {
       "get": {
         "tags": [
@@ -10939,6 +11002,16 @@
                 "type": "null"
               }
             ]
+          },
+          "table_provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TableProviderRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -10947,7 +11020,7 @@
           "label"
         ],
         "title": "EnrichmentTable",
-        "description": "One authorized table of a context. Optionally a node-key lookup\n(``key_column`` set) and/or an edge enrichment ``query``. Or, with no table,\nan enrichment by a registered ``provider``."
+        "description": "One entry of what a context may read beyond its graph: an authorized table,\noptionally with a node-key lookup (``key_column`` set) and/or an enrichment\n``query``; or, with no table, an enrichment by a registered ``provider``; or a\ntable source (``table_provider``): rows about one item from registered code."
       },
       "EntityCase": {
         "properties": {
@@ -12163,7 +12236,7 @@
             },
             "type": "array",
             "title": "Context Menu Actions",
-            "description": "Context-level configurable context-menu actions (open-url, copy-text, run-query-template, show-same-value, show-table, run-table-provider). Passed through opaquely; the frontend owns the shape. A run-query-template action with resultMode 'table' also runs on the server: POST /api/graph-contexts/{id}/menu-actions/{action_id}/table. A show-table action computes its rows in the browser from the loaded graph (a neighbors walk or a sandboxed JavaScript program); agents run its neighbors walk on a case graph through the MCP tool run_entity_action. A run-table-provider action runs a table provider the deployment registered (provider, paramBindings, params) through the same route."
+            "description": "Context-level configurable context-menu actions (open-url, copy-text, run-query-template, show-same-value, show-table, run-table-provider). Passed through opaquely; the frontend owns the shape. A run-query-template action with resultMode 'table' also runs on the server: POST /api/graph-contexts/{id}/menu-actions/{action_id}/table. A show-table action computes its rows in the browser from the loaded graph (a neighbors walk or a sandboxed JavaScript program); agents run its neighbors walk on a case graph through the MCP tool run_entity_action. A run-table-provider action runs a table source the context declares in enrichment_tables (source, paramBindings, params) through the same route."
           },
           "metric_definitions": {
             "items": {
@@ -17799,6 +17872,51 @@
         "title": "TablePromoteRequest",
         "description": "``as = enrichment`` (key_column, match_node_types, match_source, key_digits) or\n``as = graph`` (source_column, target_column, source_type, target_type, edge_type,\nnormalize, amount_prop, time_prop); options missing fall back to the first columns."
       },
+      "TableProviderRef": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,49}$",
+            "title": "Name"
+          },
+          "params": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "type": "object",
+            "maxProperties": 32,
+            "title": "Params"
+          },
+          "runtime_params": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Runtime Params"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "TableProviderRef",
+        "description": "A table source of the context: a table provider the deployer registered in\nPython (``services/table_providers.py``), declared here under the entry's\n``name``. Right-click actions and agents use it by that name, never by the\nprovider's own."
+      },
       "TableQueryRequest": {
         "properties": {
           "query": {
@@ -18109,6 +18227,44 @@
           "item_id"
         ],
         "title": "TableSide"
+      },
+      "TableSourceRequest": {
+        "properties": {
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MenuActionTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parameters": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Parameters"
+          },
+          "row_limit": {
+            "type": "integer",
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Row Limit",
+            "default": 1000
+          }
+        },
+        "type": "object",
+        "title": "TableSourceRequest",
+        "description": "A table source asked directly: the open parameters and, optionally, the item it is about."
       },
       "TaskResponse": {
         "properties": {

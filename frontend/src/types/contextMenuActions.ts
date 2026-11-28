@@ -164,17 +164,20 @@ export interface ShowTableActionConfig extends MenuActionBase {
 }
 
 /**
- * Rows about the clicked item from a table provider the deployment registered in
- * Python (it may call an internal service or another database). Runs on the server
- * like a warehouse table: same window, same case canvas and agent tools.
+ * Rows about the clicked item from a table source of the context: a table provider the
+ * deployment registered in Python (it may call an internal service or another database),
+ * declared in the context's list of enrichments and data sources. Runs on the server like
+ * a warehouse table: same window, same case canvas and agent tools.
  */
 export interface RunTableProviderActionConfig extends MenuActionBase {
   kind: 'run-table-provider';
-  /** A registered provider's name (/api/config `table_providers`). */
-  provider: string;
-  /** param name -> template resolved against the clicked item, e.g. { account: '{node_id}' }. */
+  /** The name of a table source of this context (an `enrichment_tables` entry with `table_provider`). */
+  source: string;
+  /** An action written before sources existed names the provider: the context's first source using it runs. */
+  provider?: string;
+  /** param name -> template resolved against the clicked item, e.g. { account: '{node_id}' }. Open parameters only. */
   paramBindings?: Record<string, string>;
-  /** param name -> a value fixed by the action: whoever runs it cannot change it. */
+  /** param name -> a value fixed by the action: whoever runs it cannot change it. Open parameters only. */
   params?: Record<string, string | number | boolean>;
 }
 

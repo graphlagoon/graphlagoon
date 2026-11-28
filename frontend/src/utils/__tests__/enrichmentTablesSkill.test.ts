@@ -70,4 +70,22 @@ describe('buildEnrichmentTablesSkill', () => {
     expect(errors).toEqual([]);
     expect(tables[tables.length - 1].provider).toMatchObject({ name: 'kyc-demo', params: { as_of_days: 30 }, runtime_params: ['as_of_days'] });
   });
+
+  it('lists every registered table provider and gives a table source that imports', () => {
+    expect(buildEnrichmentTablesSkill(input)).toContain('No table provider is registered on this server');
+    const text = buildEnrichmentTablesSkill({
+      ...input,
+      tableProviders: [{
+        name: 'tx-history', label: 'Transactions (ledger)', description: 'Transactions of one account.', targets: ['node'], columns: ['at', 'amount'],
+        params: [{ name: 'account', type: 'str', required: true, default: null, description: 'Account id', choices: null, min: null, max: null }],
+      }],
+    });
+    expect(text).toContain('`tx-history` — Transactions (ledger). Has a table for: node.');
+    expect(text).toContain('Returns: `at`, `amount`.');
+    expect(text).toContain('- `account` (str, required): Account id');
+    const example = text.split('## YAML format')[1].split('```yaml\n')[1].split('```')[0];
+    const { tables, errors } = parseEnrichmentTablesYaml(example);
+    expect(errors).toEqual([]);
+    expect(tables[tables.length - 1]).toMatchObject({ name: 'tx_history_source', table_provider: { name: 'tx-history', runtime_params: ['account'] } });
+  });
 });

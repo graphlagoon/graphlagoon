@@ -5,14 +5,16 @@ Three things, all read-only and all bounded by the context:
 
 - ``catalog(context)``: its graph tables and how they map to nodes and edges, its
   types and properties, the tables it authorizes, and its *sources* — the lookups,
-  enrichment queries and providers its author declared in ``enrichment_tables``.
+  enrichment queries, providers and table sources its author declared in
+  ``enrichment_tables``.
 - ``table_columns(...)``: the warehouse's own metadata (column names, types and
   comments) for tables of the context.
 - ``run_query(...)`` / ``query_source(...)``: an ad-hoc read-only query over the
   context's tables (the console's rules), or one declared source asked about some ids.
 
 Nothing here adds reach: every call is one a reader of the context could already make
-through the REST routes (the console query, the enrichment run and lookup). Metadata is
+through the REST routes (the console query, the enrichment run and lookup, a table
+source's own route). Metadata is
 additive, never a gate: a source or a column with no description is listed all the same.
 """
 
@@ -94,10 +96,18 @@ def sources(context) -> list[dict]:
     ``tables``. Each says how ``query_source`` takes it."""
     out = []
     for entry in enrichment.describe_tables(context):
-        lookup, run = entry.get("lookup"), entry.get("run")
-        if not lookup and not run:
+        lookup, run, table_source = entry.get("lookup"), entry.get("run"), entry.get("table_source")
+        if not lookup and not run and not table_source:
             continue
         ask: dict[str, Any] = {}
+        if table_source:
+            opened = [p["name"] for p in table_source["params"] if p["overridable"]]
+            ask["table"] = {
+                "params": f"set {', '.join(opened)}" if opened else "none to set: the context fixed them all",
+                "ids": "optional: one id of the " + " or ".join(table_source["targets"] or ["node"])
+                + " it is about, if its description says it reads the item",
+                "returns": "columns and rows",
+            }
         if lookup:
             source = lookup.get("match_source", "node_id")
             ask["lookup"] = {
@@ -272,15 +282,19 @@ def _source(context, name: str) -> dict:
 async def query_source(
     warehouse, context, user_email: str, name: str, ids: Optional[list[str]] = None,
     items: Optional[list[dict]] = None, params: Optional[dict] = None, how: Optional[str] = None,
+    row_limit: int = DEFAULT_QUERY_ROWS,
 ) -> dict:
     """One declared source asked about ``ids`` (or full ``items`` when it needs node
-    types, properties or an edge's endpoints). Nothing is written anywhere."""
+    types, properties or an edge's endpoints), or a table source asked with ``params``.
+    Nothing is written anywhere."""
     from graphlagoon.models.schemas import EnrichmentRunEdge, EnrichmentRunNode
 
     entry = _source(context, name)
     mode = how or entry["how"][0]
     if mode not in entry["how"]:
         raise CatalogError(400, "INVALID_BODY", f"'{name}' is asked with how = {' or '.join(entry['how'])}")
+    if mode == "table":
+        return await _query_table_source(context, user_email, entry, ids, items, params, row_limit)
     try:
         if mode == "lookup":
             if params:
@@ -322,3 +336,42 @@ async def query_source(
     if result.get("error"):
         out.update(partial=True, error=result["error"])
     return out
+
+
+async def _query_table_source(context, user_email: str, entry: dict, ids, items, params, row_limit: int) -> dict:
+    """A table source asked directly. A refusal of the parameters or a failure of the
+    provider is an error here (an action's window shows them inline instead)."""
+    from graphlagoon.services import menu_action_tables as mat
+
+    given = list(items or []) + [{"id": i} for i in ids or []]
+    if len(given) > 1:
+        raise CatalogError(400, "INVALID_KEY", f"'{entry['name']}' is about one item at a time: give one id")
+    target = None
+    if given:
+        item = given[0]
+        ident = item.get("id") or item.get("node_id") or item.get("edge_id")
+        if not ident:
+            raise CatalogError(400, "INVALID_KEY", "The item needs an id")
+        kind = "edge" if item.get("edge_id") or item.get("src") else "node"
+        target = {k: v for k, v in {
+            "type": kind, "id": str(ident), "node_type": item.get("node_type"),
+            "relationship_type": item.get("relationship_type"), "src": item.get("src"), "dst": item.get("dst"),
+        }.items() if v}
+    try:
+        result = await mat.run_source(
+            context, user_email, entry["name"], {k: v for k, v in (params or {}).items()},
+            target, max(1, min(int(row_limit), MAX_QUERY_ROWS)),
+        )
+    except mat.MenuActionError as exc:
+        raise CatalogError(exc.status, exc.code, exc.message) from exc
+    if result["status"] == "needs_parameters":
+        said = "; ".join(f"{k} {v}" for k, v in result["problems"].items())
+        raise CatalogError(400, "TABLE_SOURCE_PARAM_INVALID", f"{said} (describe_context lists the parameters)")
+    if result["status"] == "failed":
+        raise CatalogError(502, result["error"]["code"], result["error"]["message"])
+    return {
+        "name": entry["name"], "how": "table", "label": entry.get("label"),
+        "params": {p["id"]: p["value"] for p in result["parameters"]},
+        "columns": result["columns"], "rows": result["rows"], "row_count": result["row_count"],
+        "row_limit": result["row_limit"], "truncated": result["truncated"],
+    }

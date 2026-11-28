@@ -43,6 +43,7 @@ function descriptionOf(r: Record<string, unknown>): string | null {
 function entryOf(raw: unknown, where: string): EnrichmentTable | string {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return `${where}: expected a mapping with name, label and table`;
   const r = raw as Record<string, unknown>;
+  if (r.table_provider !== undefined && r.table_provider !== null) return tableSourceEntryOf(r, where);
   if (r.provider !== undefined && r.provider !== null) return providerEntryOf(r, where);
   const table = typeof r.table === 'string' ? r.table.trim() : '';
   const parts = table.split('.');
@@ -103,6 +104,56 @@ function entryOf(raw: unknown, where: string): EnrichmentTable | string {
   return entry;
 }
 
+/** `params` and `runtime_params` of a provider mapping, or the reason they are refused. */
+function paramSettingsOf(
+  p: Record<string, unknown>,
+  field: string,
+  where: string,
+): { params: Record<string, string | number | boolean>; runtime: string[] } | string {
+  const params: Record<string, string | number | boolean> = {};
+  if (p.params !== undefined && p.params !== null) {
+    if (typeof p.params !== 'object' || Array.isArray(p.params)) return `${where}: ${field}.params is a mapping of parameter name to value`;
+    for (const [key, value] of Object.entries(p.params as Record<string, unknown>)) {
+      if (value === null || value === undefined) continue;
+      if (!['string', 'number', 'boolean'].includes(typeof value)) return `${where}: ${field}.params.${key} must be text, a number or true/false`;
+      params[key] = value as string | number | boolean;
+    }
+  }
+  let runtime: string[] = [];
+  if (p.runtime_params !== undefined && p.runtime_params !== null) {
+    if (!Array.isArray(p.runtime_params) || p.runtime_params.some((n) => typeof n !== 'string')) {
+      return `${where}: ${field}.runtime_params is a list of parameter names`;
+    }
+    runtime = (p.runtime_params as string[]).map((n) => n.trim()).filter(Boolean);
+  }
+  return { params, runtime };
+}
+
+/** A table source: an entry with no table, naming a registered table provider (a name or a mapping). */
+function tableSourceEntryOf(r: Record<string, unknown>, where: string): EnrichmentTable | string {
+  if (r.table || r.query || r.key_column || r.provider) return `${where}: a table source has no table, query, lookup or provider`;
+  const p: Record<string, unknown> = typeof r.table_provider === 'string' ? { name: r.table_provider } : (r.table_provider as Record<string, unknown>);
+  const providerName = typeof p.name === 'string' ? p.name.trim() : '';
+  if (!/^[a-z0-9][a-z0-9_-]{0,49}$/.test(providerName)) return `${where}: table_provider.name must be a registered table provider's name`;
+  const label = (typeof r.label === 'string' && r.label.trim()) || providerName;
+  const name = typeof r.name === 'string' && r.name.trim() ? r.name.trim() : slug(label);
+  if (!NAME.test(name)) return `${where}: name "${name}" must be lowercase letters, digits and _ (starting with a letter)`;
+  const description = descriptionOf(r);
+  if (description === null) return `${where}: description is text of at most ${MAX_DESCRIPTION} characters`;
+  const settings = paramSettingsOf(p, 'table_provider', where);
+  if (typeof settings === 'string') return settings;
+  return {
+    name,
+    label,
+    ...(description ? { description } : {}),
+    table_provider: {
+      name: providerName,
+      ...(Object.keys(settings.params).length ? { params: settings.params } : {}),
+      ...(settings.runtime.length ? { runtime_params: settings.runtime } : {}),
+    },
+  };
+}
+
 /** An entry with no table, enriched by a provider the deployment registered (a name or a mapping). */
 function providerEntryOf(r: Record<string, unknown>, where: string): EnrichmentTable | string {
   if (r.table || r.query || r.key_column) return `${where}: a provider entry has no table, query or lookup`;
@@ -116,22 +167,9 @@ function providerEntryOf(r: Record<string, unknown>, where: string): EnrichmentT
   if (!NAME.test(name)) return `${where}: name "${name}" must be lowercase letters, digits and _ (starting with a letter)`;
   const description = descriptionOf(r);
   if (description === null) return `${where}: description is text of at most ${MAX_DESCRIPTION} characters`;
-  const params: Record<string, string | number | boolean> = {};
-  if (p.params !== undefined && p.params !== null) {
-    if (typeof p.params !== 'object' || Array.isArray(p.params)) return `${where}: provider.params is a mapping of parameter name to value`;
-    for (const [key, value] of Object.entries(p.params as Record<string, unknown>)) {
-      if (value === null || value === undefined) continue;
-      if (!['string', 'number', 'boolean'].includes(typeof value)) return `${where}: provider.params.${key} must be text, a number or true/false`;
-      params[key] = value as string | number | boolean;
-    }
-  }
-  let runtime: string[] = [];
-  if (p.runtime_params !== undefined && p.runtime_params !== null) {
-    if (!Array.isArray(p.runtime_params) || p.runtime_params.some((n) => typeof n !== 'string')) {
-      return `${where}: provider.runtime_params is a list of parameter names`;
-    }
-    runtime = (p.runtime_params as string[]).map((n) => n.trim()).filter(Boolean);
-  }
+  const settings = paramSettingsOf(p, 'provider', where);
+  if (typeof settings === 'string') return settings;
+  const { params, runtime } = settings;
   return {
     name,
     label,
@@ -182,6 +220,17 @@ const described = (t: EnrichmentTable) => (t.description?.trim() ? { description
 /** The entries as YAML, SQL as a block, in the API's field names. */
 export function enrichmentTablesToYaml(tables: EnrichmentTable[]): string {
   const clean = tables.map((t) => {
+    if (t.table_provider?.name) {
+      const p = t.table_provider;
+      return {
+        name: t.name, label: t.label, ...described(t),
+        table_provider: {
+          name: p.name,
+          ...(p.params && Object.keys(p.params).length ? { params: p.params } : {}),
+          ...(p.runtime_params?.length ? { runtime_params: p.runtime_params } : {}),
+        },
+      };
+    }
     if (t.provider?.name) {
       const p = t.provider;
       return { name: t.name, label: t.label, ...described(t), provider: {

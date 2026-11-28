@@ -223,6 +223,10 @@ AUDIT_EXEMPT_ROUTES: dict[tuple[str, str], str] = {
         "read-only query of a saved template, scoped like query/table; an agent's run is "
         "audited as agent.read (run_entity_action)"
     ),
+    ("POST", "/api/graph-contexts/{context_id}/sources/{name}/table"): (
+        "read-only: asks a table source the context declares (a registered table provider); "
+        "an agent's call is audited as agent.read (query_source)"
+    ),
     ("POST", "/api/graph-contexts/{context_id}/query/job/{job_id}/cancel"): (
         "cancels the caller's own query"
     ),

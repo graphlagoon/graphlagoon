@@ -1,9 +1,15 @@
 """Table providers: rows about one node or edge, computed by code the deployer registers.
 
-A right-click action of kind ``run-table-provider`` runs a registered provider for the
-clicked node or edge and shows what it returns as a table — the same modal, CSV export,
-"Add to case" and agent tools (``list_entity_actions`` / ``run_entity_action``) as a
-query-template table. Where a query template is the context author's SQL on the SQL
+A context declares a *table source*: an entry of its ``enrichment_tables`` naming a
+registered provider (``table_provider``), with the context's parameter values and the
+parameters a caller may set. That declaration is the isolation boundary: a provider is
+usable in a context only through a source that context declares (which takes
+``context.create``), by someone who can read the context.
+
+A right-click action of kind ``run-table-provider`` points at a source and runs it for
+the clicked node or edge, showing what it returns as a table — the same modal, CSV
+export, "Add to case" and agent tools (``list_entity_actions`` / ``run_entity_action``)
+as a query-template table. An agent can also ask a source directly (``query_source``). Where a query template is the context author's SQL on the SQL
 warehouse, a provider is an async Python callable registered when the app is built —
 ``create_mountable_app(table_providers=[...])`` — that may read anything the process can
 reach: an internal REST service, Lakebase, a cache.
@@ -28,10 +34,11 @@ agent); honouring ``row_limit`` at the source; not blocking the event loop. Rais
 ``TableProviderError`` for a message the user should see; any other exception reaches
 the user as a generic failure, named only in the server log.
 
-Parameter values come, in order, from: the action's fixed ``params`` (set by whoever
-configured the action, and not changeable by whoever runs it), the value typed in the
-table, the action's binding to the clicked item (``{node_id}``, ``{prop:x}``), the
-declared default.
+A parameter the source does not list in ``runtime_params`` always takes the context's
+value (or the declared default). One it lists comes, in order, from: the action's fixed
+``params`` (not changeable by whoever runs it), the value typed in the table or passed
+by an agent, the action's binding to the clicked item (``{node_id}``, ``{prop:x}``),
+the context's value, the declared default.
 """
 
 from __future__ import annotations
@@ -42,7 +49,12 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal, Optional
 from uuid import UUID
 
-from graphlagoon.services.enrichment_providers import PROVIDER_NAME_RE
+from graphlagoon.services.enrichment_providers import (
+    PROVIDER_NAME_RE,
+    ColumnSpec,
+    column_names,
+    validate_columns,
+)
 from graphlagoon.services.precomputed.params import ParamSpec, validate_param_specs
 
 logger = logging.getLogger(__name__)
@@ -60,7 +72,9 @@ class TableProviderRequest:
     user_email: Optional[str]
     #: The clicked item: ``{type: "node"|"edge", id, node_type, relationship_type,
     #: src, dst}`` (ids are the datasource's own). Its properties are not sent:
-    #: what a provider needs from the item arrives as a bound parameter.
+    #: what a provider needs from the item arrives as a bound parameter. **Empty**
+    #: when the source is asked directly, with no clicked item (an agent's
+    #: ``query_source``): read what you need from ``params``, not from here.
     target: dict
     #: Declared parameters only, typed and inside their bounds.
     params: dict[str, Any] = field(default_factory=dict)
@@ -92,6 +106,9 @@ class TableProvider:
     #: given to an AI asked to write actions and to an agent choosing one.
     description: str = ""
     params: list[ParamSpec] = field(default_factory=list)
+    #: The columns it returns, to describe them before anyone runs it: names, or
+    #: ``ColumnSpec`` with type, meaning and unit. Documentation only.
+    columns: tuple = ()
     timeout_seconds: float = 30.0
     #: Which contexts may use it (asked with the context on every run). None: all.
     applies_to: Optional[Callable[[Any], bool]] = None
@@ -104,6 +121,7 @@ class TableProvider:
             "description": self.description,
             "targets": list(self.targets),
             "params": [p.ui_payload() for p in self.params],
+            "columns": column_names(self.columns),
         }
 
 
@@ -128,6 +146,7 @@ def validate_provider(provider: TableProvider) -> None:
     if not provider.timeout_seconds or provider.timeout_seconds <= 0:
         raise ValueError(f"{owner}: timeout_seconds must be positive")
     validate_param_specs(provider.params, owner=owner, url=False)
+    validate_columns(provider.columns, owner)
     if provider.applies_to is not None and not callable(provider.applies_to):
         raise ValueError(f"{owner}: applies_to must be callable")
 
@@ -161,6 +180,7 @@ def clear_table_provider_registry() -> None:
 
 
 __all__ = [
+    "ColumnSpec",
     "ParamSpec",
     "TableProvider",
     "TableProviderError",

@@ -129,7 +129,7 @@ def scope_problem(
     read only the virtual tables, the context's own tables and the tables of
     ``all_tables`` (the whole new list)."""
     sources = current_source_scope()
-    tables = [t for t in tables if not t.get("provider")]  # no table to scope
+    tables = [t for t in tables if t.get("table")]  # a provider entry has no table to scope
     for spec in tables:
         problem = source_problem(spec["table"], context, sources)
         if problem:
@@ -431,13 +431,59 @@ async def run_query(warehouse, context, name: str, edges: list, nodes: list) -> 
 # --- Enrichment by a registered provider --------------------------------------
 
 
+def _params_problem(provider, ref: dict, code: str) -> Optional[EnrichmentError]:
+    """Why an entry's ``params`` / ``runtime_params`` do not fit what ``provider`` declares."""
+    from graphlagoon.services.precomputed.params import ParamError, coerce_values
+
+    declared = {p.name for p in provider.params}
+    runtime = ref.get("runtime_params") or []
+    unknown = next((n for n in runtime if n not in declared), None)
+    if unknown is not None:
+        return EnrichmentError(
+            400, code, f"The provider '{provider.name}' declares no parameter '{unknown}'"
+        )
+    # A required parameter left to the run is filled then; every other one must fit now.
+    specs = [p for p in provider.params if not (p.required and p.name in runtime
+                                                and p.name not in (ref.get("params") or {}))]
+    try:
+        coerce_values(specs, ref.get("params") or {})
+    except ParamError as e:
+        return EnrichmentError(400, code, e.message)
+    return None
+
+
+def table_source_problem(spec: dict, context=None) -> Optional[EnrichmentError]:
+    """Why a table-source entry cannot be used here, or None: its table provider is
+    not registered in this deployment, is not for this context (``context`` given),
+    or the entry's parameters do not fit what it declares."""
+    from graphlagoon.services.table_providers import get_table_provider
+
+    ref = spec.get("table_provider") or {}
+    provider = get_table_provider(ref.get("name", ""))
+    if provider is None:
+        return EnrichmentError(
+            400,
+            "TABLE_PROVIDER_NOT_REGISTERED",
+            f"No table provider '{ref.get('name')}' is registered on this server",
+        )
+    if context is not None and provider.applies_to is not None and not provider.applies_to(context):
+        return EnrichmentError(
+            403,
+            "TABLE_PROVIDER_NOT_ALLOWED",
+            f"The provider '{provider.name}' is not available to this context",
+        )
+    return _params_problem(provider, ref, "TABLE_SOURCE_PARAM_INVALID")
+
+
 def provider_problem(spec: dict, context=None) -> Optional[EnrichmentError]:
     """Why a provider entry cannot run here, or None: its provider is not registered
     in this deployment, does not enrich the entry's target, is not for this context
-    (``context`` given), or the entry's parameters do not fit what it declares."""
+    (``context`` given), or the entry's parameters do not fit what it declares. A
+    table-source entry is judged by ``table_source_problem``."""
     from graphlagoon.services.enrichment_providers import get_enrichment_provider
-    from graphlagoon.services.precomputed.params import ParamError, coerce_values
 
+    if spec.get("table_provider"):
+        return table_source_problem(spec, context)
     ref = spec.get("provider") or {}
     provider = get_enrichment_provider(ref.get("name", ""))
     if provider is None:
@@ -459,23 +505,7 @@ def provider_problem(spec: dict, context=None) -> Optional[EnrichmentError]:
             "ENRICHMENT_PROVIDER_NOT_ALLOWED",
             f"The provider '{provider.name}' is not available to this context",
         )
-    declared = {p.name for p in provider.params}
-    runtime = ref.get("runtime_params") or []
-    unknown = next((n for n in runtime if n not in declared), None)
-    if unknown is not None:
-        return EnrichmentError(
-            400,
-            "ENRICHMENT_PARAM_INVALID",
-            f"The provider '{provider.name}' declares no parameter '{unknown}'",
-        )
-    # A required parameter left to the run is filled then; every other one must fit now.
-    specs = [p for p in provider.params if not (p.required and p.name in runtime
-                                                and p.name not in (ref.get("params") or {}))]
-    try:
-        coerce_values(specs, ref.get("params") or {})
-    except ParamError as e:
-        return EnrichmentError(400, "ENRICHMENT_PARAM_INVALID", e.message)
-    return None
+    return _params_problem(provider, ref, "ENRICHMENT_PARAM_INVALID")
 
 
 def resolve_provider_params(provider, ref: dict, given: Optional[dict]) -> dict:
@@ -517,6 +547,7 @@ async def run_provider(
     from graphlagoon.services.enrichment_providers import (
         EnrichmentProviderError,
         EnrichmentProviderRequest,
+        column_names,
         get_enrichment_provider,
     )
 
@@ -590,7 +621,7 @@ async def run_provider(
         raise EnrichmentError(502, "ENRICHMENT_PROVIDER_FAILED", "The provider failed")
     query_ms = round((time.perf_counter() - t0) * 1000, 2)
     sent = {getattr(t, key) for t in targets}
-    declared = set(provider.columns)
+    declared = set(column_names(provider.columns))
     undeclared: set[str] = set()
     rows: dict[str, dict] = {}
     columns: list[str] = []
@@ -633,6 +664,17 @@ MAX_GRAPH_RUN_BATCHES = 20
 MAX_GRAPH_RUN_SECONDS = 120.0
 
 
+def column_payload(columns) -> list[dict]:
+    """A provider's declared columns as an agent reads them: name and, when its
+    author said so, type, description and unit."""
+    from graphlagoon.services.enrichment_providers import column_specs
+
+    return [
+        {k: v for k, v in (("name", c.name), ("type", c.type), ("description", c.description), ("unit", c.unit)) if v}
+        for c in column_specs(columns)
+    ]
+
+
 def describe_tables(context) -> list[dict]:
     """Each enrichment of ``context`` as an agent needs it to choose one: what it is,
     the author's description (a provider's registered one when the entry has none),
@@ -670,7 +712,7 @@ def describe_tables(context) -> list[dict]:
                 }
                 run["edge_props"] = bool(ref.get("edge_props"))
                 # The properties it writes, when its author declared them.
-                run["columns"] = list(provider.columns) if provider else []
+                run["columns"] = column_payload(provider.columns) if provider else []
                 fixed, runtime = ref.get("params") or {}, set(ref.get("runtime_params") or [])
                 run["params"] = [
                     {
@@ -684,6 +726,29 @@ def describe_tables(context) -> list[dict]:
                     description = provider.description
             else:
                 run["sql"] = ref.get("sql")
+        table_source = None
+        if spec.get("table_provider"):
+            from graphlagoon.services.table_providers import get_table_provider
+
+            source_ref = spec["table_provider"]
+            table_provider = get_table_provider(source_ref.get("name", ""))
+            fixed, runtime = source_ref.get("params") or {}, set(source_ref.get("runtime_params") or [])
+            table_source = {
+                "provider": {
+                    "name": source_ref.get("name"),
+                    "label": (table_provider.label or table_provider.name) if table_provider else source_ref.get("name"),
+                    "registered": table_provider is not None,
+                },
+                # What kind of item it is about, when asked from a right-click.
+                "targets": list(table_provider.targets) if table_provider else [],
+                "columns": column_payload(table_provider.columns) if table_provider else [],
+                "params": [
+                    {**p.ui_payload(), "value": fixed.get(p.name, p.default), "overridable": p.name in runtime}
+                    for p in (table_provider.params if table_provider else [])
+                ],
+            }
+            if not description and table_provider:
+                description = table_provider.description
         out.append(
             {
                 "name": spec.get("name"),
@@ -692,6 +757,7 @@ def describe_tables(context) -> list[dict]:
                 "table": spec.get("table"),
                 "lookup": lookup,
                 "run": run,
+                "table_source": table_source,
             }
         )
     return out
